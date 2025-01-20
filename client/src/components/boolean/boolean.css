@@ -1,0 +1,55 @@
+.boolean {
+    min-width: 258px;
+    font-size: 20px;
+    display: inline-flex;
+    justify-content: space-between;
+    align-items: stretch;
+    margin: 10px 0;
+}
+
+.boolean-label {
+    display: inline-block;
+    background-color: var(--background-color);
+    border: 1px solid var(--primary-color-dark);
+    color: var(--tertiary-color);
+    padding: 20px 25px;
+    font-size: 20px;
+    margin-right: 5px;
+    min-width: 258px;
+}
+
+.boolean-answers {
+    border: 1px solid var(--primary-color-dark);
+    background-color: var(--background-color);
+    display: inline-block;
+}
+
+.boolean input {
+    position: absolute;
+    opacity: 0;
+    cursor: pointer;
+    height: 0;
+    width: 0;
+}
+
+.boolean-answers label {
+    padding: 0 25px;
+    font-size: 30px;
+    display: inline-flex;
+    cursor: pointer;
+    margin: 0;
+    align-items: center;
+    justify-content: center;
+    font-weight: 500;
+    height: 100%;
+}
+
+.boolean-answers input.true:checked ~ label.true {
+    background-color: var(--secondary-color);
+    color: var(--background-color);
+}
+
+.boolean-answers input.false:checked ~ label.false {
+    background-color: var(--primary-color-dark);
+    color: var(--background-color);
+}
