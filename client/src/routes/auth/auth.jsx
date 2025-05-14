@@ -323,11 +323,11 @@ export default function Auth() {
                         );
                         clearInterval(interval);
                         localStorage.setItem("isAuthenticated", true);
-                        // window.location.href = `/${
-                        //     searchParams.get("redirect")
-                        //         ? searchParams.get("redirect")
-                        //         : "home"
-                        // }`;
+                        window.location.href = `/${
+                            searchParams.get("redirect")
+                                ? searchParams.get("redirect")
+                                : "home"
+                        }`;
                     }
                 };
 

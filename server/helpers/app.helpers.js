@@ -11,7 +11,7 @@ function buf2hex(buffer) {
 const checkIfUserExists = async (displayName, userNo) => {
     userNo = parseInt(userNo);
     const result = await query('SELECT * FROM "user" WHERE display_name = $1 AND user_no = $2', [displayName, userNo]);
-
+    console.log(result.rows)
     if (result.rowCount === 0) {
         return false;
     }
