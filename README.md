@@ -2,6 +2,8 @@
 
 A work-in-progress online chat application.
 
+### This branch is for progress regarding the implementation of the Signal protocol! 
+
 ![image](https://github.com/user-attachments/assets/d2cd63f3-0107-45d6-9415-8367a693cb21)
 
 Cyber Netwire is an online, end-to-end encrypted chat app with similar functions to Discord or Slack. Or at least, that's the plan.
