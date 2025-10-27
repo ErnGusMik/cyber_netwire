@@ -3,6 +3,7 @@
 A work-in-progress online chat application.
 
 ### This branch is for progress regarding the implementation of the Signal protocol! 
+Read the threat model and design decisions in the [THREAT_MODEL.md](THREAT_MODEL.md) file.
 
 ![image](https://github.com/user-attachments/assets/d2cd63f3-0107-45d6-9415-8367a693cb21)
 
