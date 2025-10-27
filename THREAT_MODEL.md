@@ -58,6 +58,8 @@ While these threat actors are considered, the primary focus for now is on extern
 | TLS compromise (MITM) | Attacker intercepts HTTPS. | Low | High | HSTS, certificate pinning, Let’s Encrypt automation. |
 | Local malware | User device infected, keys stolen. | Variable | Critical | Out of scope for E2EE, user responsibility. |
 
+It is important to note the heightened risks associated with delivering end-to-end encryption via a web application. The primary concern is the potential for malicious JavaScript delivery, which could compromise the confidentiality of messages even if they are end-to-end encrypted. An attacker could gain access to the server and manipulate the code served to clients. This attack could affect multiple clients or a single client over a longer period or a few minutes. Therefore, significant emphasis must be placed on ensuring the integrity of the code served to clients.
+
 ### Mitigations
 | Area | Mitigation | Residual Risk |
 |------|------------|---------------|
