@@ -5,6 +5,7 @@
     --primary-color-dark: #9c3230;
     --primary-color-dark-xtra: #5d2322;
     --secondary-color: #2be4ea;
+    --secondary-color-rgb: 43, 228, 234;
     --secondary-color-dark: #295459;
     --tertiary-color: #fed33f;
 
@@ -23,6 +24,7 @@
 
     --text-shadow: -9px -6px 40px var(--primary-color);
     --text-shadow-secondary: -9px -6px 40px var(--secondary-color);
+    --hr-shadow: 0px 0px 10px 0px var(--primary-color);
 
     --ui-notch-path: polygon(
         0 0,
@@ -84,15 +86,19 @@ h3 {
 }
 
 .secondary {
-    color: var(--secondary-color);
+    color: var(--secondary-color) !important;
+}
+
+.text-shadow-secondary {
+    text-shadow: var(--text-shadow-secondary) !important;
 }
 
 .tertiary {
-    color: var(--tertiary-color);
+    color: var(--tertiary-color) !important;
 }
 
 .primary {
-    color: var(--primary-color);
+    color: var(--primary-color) !important;
 }
 
 .hr {
