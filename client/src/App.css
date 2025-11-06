@@ -31,6 +31,15 @@
         calc(100% - 17px) 100%,
         0 100%
     );
+    --ui-notch-both-path: polygon(
+        0 17px,
+        17px 0,
+        100% 0,
+        100% calc(100% - 17px),
+        calc(100% - 17px) 100%,
+        0 100%
+    );
+
     --ui-notch-hypotenuse: 24.04px;
 }
 
