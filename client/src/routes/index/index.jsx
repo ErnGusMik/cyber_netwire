@@ -2,6 +2,16 @@ import React from "react";
 import "./index.css";
 
 export default function Index() {
+
+    const handleEncryptionMouseMove = (e) => {
+        const encryptBackg = document.getElementById("home-encrypt-backg");
+        const rect = encryptBackg.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        encryptBackg.style.setProperty("--cursor-x", `${x}px`);
+        encryptBackg.style.setProperty("--cursor-y", `${y}px`);
+    };
+
     return (
         <div className="homepage">
             <div className="nav">
@@ -69,13 +79,16 @@ export default function Index() {
                 <hr />
                 <div className="content">
                     <div className="anim-text"></div>
-                    <div className="main">
-                        <h2 className="secondary text-shadow-secondary">Top-tier encryption</h2>
-                        <hr />
-                        <p className="tertiary">Your privacy is our priority: stay secure in the urban jungle</p>
+                    <div className="main" id="home-encrypt-backg" onMouseMove={handleEncryptionMouseMove}>
+                        <div className="main-backg">
+                            <h2 className="secondary text-shadow-secondary">Top-tier encryption</h2>
+                            <hr className="content-hr"/>
+                            <p className="tertiary">Your privacy is our priority: <br />stay secure in the urban jungle</p>
+                        </div>
                     </div>
                     <div className="anim-text"></div>
                 </div>
+                <hr />
             </div>
         </div>
     );

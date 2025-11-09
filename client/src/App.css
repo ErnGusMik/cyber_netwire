@@ -8,6 +8,7 @@
     --secondary-color-rgb: 43, 228, 234;
     --secondary-color-dark: #295459;
     --tertiary-color: #fed33f;
+    --tertiary-color-rgb: 254, 211, 63;
 
     --background-gradient: linear-gradient(
             144deg,
@@ -16,6 +17,7 @@
         ),
         #191a1e;
     --background-color: #1e181e;
+    --background-color-dark: #191A1E;
     --background-color-red: #391419;
     --background-color-red-lighter: #451717;
 
