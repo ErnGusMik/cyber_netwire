@@ -12,6 +12,55 @@ export default function Index() {
         encryptBackg.style.setProperty("--cursor-y", `${y}px`);
     };
 
+    const handleEncryptAnimation = () => {
+        const animTag1 = document.getElementById("encrypt-anim-tag-1");
+        const animContent1 = document.getElementById("encrypt-anim-content-1");
+        const content1 = animContent1.textContent;
+
+        animContent1.classList.add("anim-ended");
+
+        // hacking effect -- letters change (for every character) for 3s, reveal real text one character at a time
+        let revealIndex = 0;
+        const interval = setInterval(() => {
+            let displayedText = "";
+            for (let i = 0; i < content1.length; i++) {
+                if (i < revealIndex) {
+                    displayedText += content1[i];
+                } else {
+                    const randomChar = String.fromCharCode(33 + Math.floor(Math.random() * 94));
+                    displayedText += randomChar;
+                }
+            }
+            animContent1.textContent = displayedText;
+            revealIndex++;
+            if (revealIndex > content1.length) {
+                clearInterval(interval);
+                animContent1.textContent = content1;
+            }
+        }, 100);
+
+        // add active class to status overlay to expand it after 2.5s
+        setTimeout(() => {
+            const statusOverlay1 = animContent1.parentElement.querySelector(".status-overlay");
+            statusOverlay1.classList.add("active");
+        }, 2500);
+
+    };
+
+    React.useEffect(() => {
+        // when scroll into view, trigger encryption animation
+        const encryptSection = document.querySelector(".homepage .encryption");
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach((entry) => {
+                if (entry.isIntersecting) {
+                    handleEncryptAnimation();
+                    observer.unobserve(encryptSection);
+                }
+            });
+        }, { threshold: 0.5 });
+        observer.observe(encryptSection);
+    }, []);
+
     return (
         <div className="homepage">
             <div className="nav">
@@ -78,7 +127,15 @@ export default function Index() {
                 <p className="module-name tertiary">/// .SUBMODULE.$SECURITY</p>
                 <hr />
                 <div className="content">
-                    <div className="anim-text"></div>
+                    <div className="anim-text">
+                        <div className="anim-line">
+                            <span className="primary" id="encrypt-anim-tag-1">namegoeshere</span><p id="encrypt-anim-content-1">John, did you buy milk?</p>
+                            <div className="status-overlay">
+                                <i className="fa-solid fa-lock-open"></i>
+                                <h6>Breached</h6>
+                            </div>
+                        </div>
+                    </div>
                     <div className="main" id="home-encrypt-backg" onMouseMove={handleEncryptionMouseMove}>
                         <div className="main-backg">
                             <h2 className="secondary text-shadow-secondary">Top-tier encryption</h2>

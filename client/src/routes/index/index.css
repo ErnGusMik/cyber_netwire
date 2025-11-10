@@ -294,6 +294,7 @@
 .homepage .encryption {
     background-color: var(--background-color-dark);
     padding: 30px 80px;
+    width: 100%;
 }
 
 .homepage .encryption hr {
@@ -333,7 +334,7 @@
     --cursor-size: 140px;
     --cursor-x: 50%;
     --cursor-y: 50%;
-    max-width: 40%;
+    width: 100%;
     height: 100%;
     position: relative;
     /* Dotted background */
@@ -393,7 +394,6 @@
 }
 
 .homepage .encryption .main .main-backg {
-    width: 100%;
     height: 100%;
     padding: 70px;
     margin: auto;
@@ -412,6 +412,96 @@
     background-repeat: no-repeat;
     background-size: 30px 30px;
     position: relative;
+}
+
+.homepage .encryption .anim-text {
+    min-width: 300px;
+}
+
+.homepage .encryption .anim-text .anim-line {
+    width: fit-content;
+    height: fit-content;
+    padding: 5px 10px;
+    margin-bottom: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+.homepage .encryption .anim-text .anim-line span {
+    font-family: var(--font-secondary);
+    margin-right: 10px;
+    font-size: 16px;
+}
+
+.homepage .encryption .anim-text .anim-line p {
+    color: white;
+    position: relative;
+}
+
+.homepage .encryption .anim-text .anim-line p::after {
+    content: "";
+    position: absolute;
+    background-color: #818181;
+    top: 0;
+    left: -6px;
+    width: calc(100% + 12px);
+    height: 100%;
+    clip-path: polygon(5% 0%, 100% 0%, 95% 100%, 0% 100%);
+    transition: width 1s ease-in-out;
+}
+
+.homepage .encryption .anim-text .anim-line p.anim-ended::after {
+    content: "";
+    position: absolute;
+    background-color: #818181;
+    top: 0;
+    left: -6px;
+    width: 0;
+    height: 100%;
+    clip-path: polygon(5% 0%, 100% 0%, 95% 100%, 0% 100%);
+}
+
+
+.homepage .encryption .anim-text .anim-line .status-overlay {
+    position: absolute;
+    z-index: 10;
+    top: 0;
+    left: 0;
+    width: 100%; 
+    height: 100%;
+    background: #71E071;
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    padding: 0 10px;
+    gap: 7px;
+    clip-path: var(--ui-notch-path);
+    box-sizing: border-box; 
+    overflow: hidden; 
+    transform-origin: left center;
+    transform: scaleX(0);
+    will-change: transform;
+    transition: transform 1s cubic-bezier(.2,.9,.2,1);
+}
+
+.homepage .encryption .anim-text .anim-line .status-overlay.active {
+    transform: scaleX(1);
+}
+
+
+.homepage .encryption .anim-text .anim-line .status-overlay h6,
+.homepage .encryption .anim-text .anim-line .status-overlay i {
+    display: inline;
+    color: var(--background-color-dark);
+    text-transform: uppercase;
+    font-size: 18px;
+}
+
+.homepage .encryption .anim-text .anim-line .status-overlay h6 {
+    font-family: var(--font-secondary);
+    font-weight: lighter;
 }
 
 /* ANIMATIONS */
