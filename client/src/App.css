@@ -17,7 +17,7 @@
         ),
         #191a1e;
     --background-color: #1e181e;
-    --background-color-dark: #191A1E;
+    --background-color-dark: #191a1e;
     --background-color-red: #391419;
     --background-color-red-lighter: #451717;
 
@@ -27,6 +27,7 @@
     --text-shadow: -9px -6px 40px var(--primary-color);
     --text-shadow-secondary: -9px -6px 40px var(--secondary-color);
     --hr-shadow: 0px 0px 10px 0px var(--primary-color);
+    --box-shadow: -9px -6px 30px var(--primary-color);
 
     --ui-notch-path: polygon(
         0 0,
@@ -113,7 +114,7 @@ h3 {
 }
 
 .light {
-        font-weight: 500;
+    font-weight: 500;
 }
 
 .one-line {
