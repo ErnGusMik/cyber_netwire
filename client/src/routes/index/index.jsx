@@ -378,6 +378,55 @@ export default function Index() {
                 </div>
                 <hr />
             </div>
+            <div className="join">
+                <p className="module-name">/// MODULE._GET_STARTED</p>
+                <div className="content">
+                    <div className="text">
+                        <h2 className="secondary">You can't scroll anymore.</h2>
+                        <h2>Better go hang out.</h2>
+                    </div>
+                    <a href="/auth">
+                        <button className="btn">
+                            <h3>Join the revolution</h3>
+                        </button>
+                    </a>
+                </div>
+            </div>
+            <div className="footer">
+                <p className="module-name tertiary">/// MODULE._FOOTER</p>
+                <hr />
+                <div className="sitemap">
+                    <ul>
+                        <li>
+                            <a href="">About</a>
+                        </li>
+                        <li>
+                            <a href="">Status</a>
+                        </li>
+                        <li>
+                            <a href="">Support</a>
+                        </li>
+                        <li>
+                            <a href="">Terms of Use & Privacy Policy</a>
+                        </li>
+                        <li>
+                            <a href="">EN</a>
+                        </li>
+                    </ul>
+                </div>
+                <hr />
+                <div className="content">
+                    <div className="copyright">
+                        <h4>Cyber Netwire</h4>
+                        <p className="tertiary">Copyright &copy; 2025 ernestsgm.</p>
+                    </div>
+                    <a href="/auth">
+                        <button className="btn">
+                            <h3>Open Cyber Netwire</h3>
+                        </button>
+                    </a>
+                </div>
+            </div>
         </div>
     );
 }
