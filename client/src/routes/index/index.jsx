@@ -140,7 +140,7 @@ export default function Index() {
             <div className="nav">
                 <ul>
                     <li>
-                        <a href="">Features</a>
+                        <a href="#features">Features</a>
                     </li>
                     <li>
                         <a href="">About</a>
@@ -178,7 +178,7 @@ export default function Index() {
                     alt="A banner pic will go here at some point"
                 />
             </div>
-            <div className="interface">
+            <div className="interface" id="features">
                 <div className="transition">
                     <p className="module-name">/// MODULE._FEATURES_MAIN</p>
                     <h2>Welcome to the Future</h2>

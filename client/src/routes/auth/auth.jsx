@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import "./auth.css";
 
+import * as libsignal from "@signalapp/libsignal-client";
+
 import Button from "../../components/button/button";
 import Input from "../../components/input/input";
 import Nav from "../../components/nav/nav";
@@ -214,6 +216,61 @@ export default function Auth() {
                     "Password must contain at least one special character!";
                 return;
             }
+
+            // ! SIGNAL PROTOCOL IMPLEMENTATION STARTS HERE
+            // Signup flow
+            // Generate identity key pair
+            const identityKey = libsignal.IdentityKeyPair.generate();
+
+            // Generating signed prekey
+            const signedPrekeyId = Math.floor(Math.random() * 1e9); // stable unique id for this prekey
+            const timestamp = Date.now();
+
+            // Generate a fresh keypair for the signed prekey
+            const signedPriv = libsignal.PrivateKey.generate();
+            const signedPub = signedPriv.getPublicKey();
+
+            // Creating signature
+            const signedPubBytes = signedPub.getPublicKeyBytes(); // Uint8Array -- needed for signing
+            const signature = identityKey.privateKey.sign(signedPubBytes); // Uint8Array
+
+            // Create SignedPreKeyRecord, to be sent to server
+            const signedPreKeyRecord = libsignal.SignedPreKeyRecord.new(
+                signedPrekeyId,
+                timestamp,
+                signedPub,
+                signedPriv,
+                signature
+            );
+
+            // Signature verification
+            const ok = identityKey.publicKey.verify(
+                signedPubBytes,
+                signature
+            );
+
+            if (!ok) {
+                document.getElementById("login-error").innerText =
+                    "Failed to securely create your account! Please try again.";
+                return;
+            }
+
+
+            // Generating one-time prekeys
+            const opk = []; // One-time PreKeys
+            const OPK_COUNT = 100;
+
+            for (let i = 0; i < OPK_COUNT; i++) {
+                const id = i + 1;
+                const priv = libsignal.PrivateKey.generate(); // Generate private key
+                const pub = priv.getPublicKey(); // Derive public key
+                const record = libsignal.PreKeyRecord.new(id, pub, priv); // Create PreKeyRecord from keys
+                opk.push(record);
+                // For upload of public key, call record.publicKey().serialize()
+            }
+
+
+            // ! SIGNAL PROTOCOL IMPLEMENTATION ENDS HERE
         }
 
         // Check if password is empty
@@ -350,7 +407,10 @@ export default function Auth() {
                             .map((x) => x.toString(16).padStart(2, "0"))
                             .join("");
                     }
-                    const exportedkey = await crypto.subtle.exportKey("pkcs8", rsaKey);
+                    const exportedkey = await crypto.subtle.exportKey(
+                        "pkcs8",
+                        rsaKey
+                    );
                     console.log(buf2hex(exportedkey));
                     //
                     //!
