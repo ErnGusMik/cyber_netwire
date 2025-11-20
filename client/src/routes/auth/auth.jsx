@@ -269,6 +269,38 @@ export default function Auth() {
                 // For upload of public key, call record.publicKey().serialize()
             }
 
+            // Create Post Quantum Kyber PreKey
+            const kyberKeyPair = libsignal.KEMKeyPair.generate();
+            const kyberPubKey = kyberKeyPair.getPublicKey();
+            const kyberPubBytes = kyberPubKey.serialize(); // Uint8Array
+
+            // Sign Kyber public key with identity private key
+            const kyberSignature = identityKey.privateKey.sign(kyberPubBytes); // Uint8Array
+
+            // Create KyberPreKeyRecord for storage / upload
+            const kyberPreKeyRecord = libsignal.KyberPreKeyRecord.new(
+                1, // kyberPreKeyId -- can be any number for now
+                Date.now(), // timestamp
+                kyberKeyPair, // Kyber keypair
+                kyberSignature // signature
+            );
+
+            // Get prekey bundle ready
+            const prekeyBundle = libsignal.PreKeyBundle.new(
+                1, // registrationId -- can be any number for now
+                1, // deviceId -- can be any number for now
+                1, // preKeyId -- selecting first prekey for now
+                opk[0].publicKey(), // preKey public key
+                signedPrekeyId, // signed prekey id
+                signedPreKeyRecord.publicKey(), // signed prekey public key
+                signedPreKeyRecord.signature, // signed prekey signature
+                identityKey.publicKey, // identity public key
+                kyberPreKeyRecord.id, // Kyber prekey id
+                kyberPreKeyRecord.publicKey, // Kyber public key
+                kyberPreKeyRecord.signature // Kyber public key signature
+            );
+
+            console.log("PreKey Bundle created:", prekeyBundle);
 
             // ! SIGNAL PROTOCOL IMPLEMENTATION ENDS HERE
         }
