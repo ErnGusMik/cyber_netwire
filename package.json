@@ -10,6 +10,7 @@
   "author": "Ernests Mikuts",
   "license": "ISC",
   "dependencies": {
+    "@privacyresearch/libsignal-protocol-typescript": "^0.0.16",
     "@signalapp/libsignal-client": "^0.86.4",
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^13.4.0",

@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import "./auth.css";
 
-import * as libsignal from "@signalapp/libsignal-client";
+// import * as libsignal from "@signalapp/libsignal-client";
+import * as libsignal from "@privacyresearch/libsignal-protocol-typescript";
 
 import Button from "../../components/button/button";
 import Input from "../../components/input/input";
@@ -219,86 +220,140 @@ export default function Auth() {
 
             // ! SIGNAL PROTOCOL IMPLEMENTATION STARTS HERE
             // Signup flow
+            // Generate registration ID
+            const registrationId = libsignal.KeyHelper.generateRegistrationId();
+
             // Generate identity key pair
-            const identityKey = libsignal.IdentityKeyPair.generate();
+            const identityKey =
+                await libsignal.KeyHelper.generateIdentityKeyPair();
 
             // Generating signed prekey
             const signedPrekeyId = Math.floor(Math.random() * 1e9); // stable unique id for this prekey
             const timestamp = Date.now();
 
-            // Generate a fresh keypair for the signed prekey
-            const signedPriv = libsignal.PrivateKey.generate();
-            const signedPub = signedPriv.getPublicKey();
-
+            // Generate a fresh keypair for the signed prekey (libsignal official)
+            // const signedPriv = libsignal.PrivateKey.generate();
+            // const signedPub = signedPriv.getPublicKey();
             // Creating signature
-            const signedPubBytes = signedPub.getPublicKeyBytes(); // Uint8Array -- needed for signing
-            const signature = identityKey.privateKey.sign(signedPubBytes); // Uint8Array
+            // const signedPubBytes = signedPub.getPublicKeyBytes(); // Uint8Array -- needed for signing
+            // const signature = identityKey.privateKey.sign(signedPubBytes); // Uint8Array
 
-            // Create SignedPreKeyRecord, to be sent to server
-            const signedPreKeyRecord = libsignal.SignedPreKeyRecord.new(
-                signedPrekeyId,
-                timestamp,
-                signedPub,
-                signedPriv,
-                signature
+            // Create SignedPreKeyRecord, to be sent to server (libsignal official)
+            // const signedPreKeyRecord = libsignal.SignedPreKeyRecord.new(
+            //     signedPrekeyId,
+            //     timestamp,
+            //     signedPub,
+            //     signedPriv,
+            //     signature
+            // );
+
+            const signedPreKey = await libsignal.KeyHelper.generateSignedPreKey(
+                identityKey,
+                signedPrekeyId
             );
 
-            // Signature verification
-            const ok = identityKey.publicKey.verify(
-                signedPubBytes,
-                signature
+            // Signature verification (libsignal official)
+            // const ok = identityKey.publicKey.verify(
+            //     signedPubBytes,
+            //     signature
+            // );
+
+            // Signed pre-key signature verification
+            const lib = await libsignal.default(); // Returns a Curve instance object
+            // basic sanity checks (helpful debugging)
+            console.log(
+                "lens:",
+                identityKey.pubKey?.byteLength,
+                signedPreKey.keyPair?.pubKey?.byteLength,
+                signedPreKey.signature?.byteLength
             );
 
-            if (!ok) {
-                document.getElementById("login-error").innerText =
-                    "Failed to securely create your account! Please try again.";
-                return;
+            // Use the async verifier and treat "no throw" as valid
+            let verified = false;
+            try {
+                // This will throw on an invalid signature (per the library implementation)
+                await lib.Curve.async.verifySignature(
+                    identityKey.pubKey,
+                    signedPreKey.keyPair.pubKey,
+                    signedPreKey.signature
+                );
+                // If we reached here, verification succeeded
+                verified = true;
+            } catch (err) {
+                console.error("Signature verification failed:", err);
+                verified = false;
             }
 
+            console.log("Signed PreKey signature valid:", verified);
+
+            if (!verified) {
+                document.getElementById("login-error").innerText =
+                    "Failed to securely create your account! Signature verification failed.";
+                return;
+            }
 
             // Generating one-time prekeys
             const opk = []; // One-time PreKeys
             const OPK_COUNT = 100;
 
             for (let i = 0; i < OPK_COUNT; i++) {
-                const id = i + 1;
-                const priv = libsignal.PrivateKey.generate(); // Generate private key
-                const pub = priv.getPublicKey(); // Derive public key
-                const record = libsignal.PreKeyRecord.new(id, pub, priv); // Create PreKeyRecord from keys
-                opk.push(record);
-                // For upload of public key, call record.publicKey().serialize()
+                // const id = i + 1;
+                // const priv = libsignal.PrivateKey.generate(); // Generate private key
+                // const pub = priv.getPublicKey(); // Derive public key
+                // const record = libsignal.PreKeyRecord.new(id, pub, priv); // Create PreKeyRecord from keys
+                // opk.push(record);
+                // // For upload of public key, call record.publicKey().serialize()
+
+                const prekey = await libsignal.KeyHelper.generatePreKey(i + 1);
+                opk.push(prekey);
             }
 
-            // Create Post Quantum Kyber PreKey
-            const kyberKeyPair = libsignal.KEMKeyPair.generate();
-            const kyberPubKey = kyberKeyPair.getPublicKey();
-            const kyberPubBytes = kyberPubKey.serialize(); // Uint8Array
+            // Create Post Quantum Kyber PreKey (libsignal official)
+            // const kyberKeyPair = libsignal.KEMKeyPair.generate();
+            // const kyberPubKey = kyberKeyPair.getPublicKey();
+            // const kyberPubBytes = kyberPubKey.serialize(); // Uint8Array
 
-            // Sign Kyber public key with identity private key
-            const kyberSignature = identityKey.privateKey.sign(kyberPubBytes); // Uint8Array
+            // Sign Kyber public key with identity private key (libsignal official)
+            // const kyberSignature = identityKey.privateKey.sign(kyberPubBytes); // Uint8Array
 
-            // Create KyberPreKeyRecord for storage / upload
-            const kyberPreKeyRecord = libsignal.KyberPreKeyRecord.new(
-                1, // kyberPreKeyId -- can be any number for now
-                Date.now(), // timestamp
-                kyberKeyPair, // Kyber keypair
-                kyberSignature // signature
-            );
+            // Create KyberPreKeyRecord for storage / upload (libsignal official)
+            // const kyberPreKeyRecord = libsignal.KyberPreKeyRecord.new(
+            //     1, // kyberPreKeyId -- can be any number for now
+            //     Date.now(), // timestamp
+            //     kyberKeyPair, // Kyber keypair
+            //     kyberSignature // signature
+            // );
 
-            // Get prekey bundle ready
-            const prekeyBundle = libsignal.PreKeyBundle.new(
-                1, // registrationId -- can be any number for now
-                1, // deviceId -- can be any number for now
-                1, // preKeyId -- selecting first prekey for now
-                opk[0].publicKey(), // preKey public key
-                signedPrekeyId, // signed prekey id
-                signedPreKeyRecord.publicKey(), // signed prekey public key
-                signedPreKeyRecord.signature, // signed prekey signature
-                identityKey.publicKey, // identity public key
-                kyberPreKeyRecord.id, // Kyber prekey id
-                kyberPreKeyRecord.publicKey, // Kyber public key
-                kyberPreKeyRecord.signature // Kyber public key signature
-            );
+            // Get prekey bundle ready (libsignal official)
+            // const prekeyBundle = libsignal.PreKeyBundle.new(
+            //     1, // registrationId -- can be any number for now
+            //     1, // deviceId -- can be any number for now
+            //     1, // preKeyId -- selecting first prekey for now
+            //     opk[0].publicKey(), // preKey public key
+            //     signedPrekeyId, // signed prekey id
+            //     signedPreKeyRecord.publicKey(), // signed prekey public key
+            //     signedPreKeyRecord.signature, // signed prekey signature
+            //     identityKey.publicKey, // identity public key
+            //     kyberPreKeyRecord.id, // Kyber prekey id
+            //     kyberPreKeyRecord.publicKey, // Kyber public key
+            //     kyberPreKeyRecord.signature // Kyber public key signature
+            // );
+
+            const prekeyBundle = {
+                registrationId: registrationId,
+                deviceId: 1,
+                preKey: {
+                    keyId: opk[0].keyId,
+                    publicKey: opk[0].keyPair.pubKey,
+                },
+                signedPreKey: {
+                    keyId: signedPreKey.keyId,
+                    publicKey: signedPreKey.keyPair.pubKey,
+                    signature: signedPreKey.signature,
+                },
+                identityKey: identityKey.pubKey,
+                timestamp: timestamp,
+            };
 
             console.log("PreKey Bundle created:", prekeyBundle);
 
@@ -411,12 +466,12 @@ export default function Auth() {
                             messageHandler
                         );
                         clearInterval(interval);
-                        localStorage.setItem("isAuthenticated", true);
-                        window.location.href = `/${
-                            searchParams.get("redirect")
-                                ? searchParams.get("redirect")
-                                : "home"
-                        }`;
+                        // localStorage.setItem("isAuthenticated", true);
+                        // window.location.href = `/${
+                        //     searchParams.get("redirect")
+                        //         ? searchParams.get("redirect")
+                        //         : "home"
+                        // }`;
                     }
                 };
 
