@@ -50,6 +50,7 @@ export default function Auth() {
         console.log("Logged in with Google: " + req.statusText);
 
         const res1 = await req.json();
+        console.log(res1);
 
         // Set Google state and CSRF token
         setGoogle(true);
@@ -147,6 +148,31 @@ export default function Auth() {
         return buf;
     }
 
+    // Browser: arrayBuffer -> base64 (chunked to avoid stack issues)
+    function arrayBufferToBase64(arrayBuffer) {
+        const bytes = new Uint8Array(arrayBuffer);
+        const chunkSize = 0x8000;
+        let binary = "";
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+            binary += String.fromCharCode.apply(
+                null,
+                bytes.subarray(i, i + chunkSize)
+            );
+        }
+        return btoa(binary);
+    }
+
+    // Browser: base64 -> ArrayBuffer
+    function base64ToArrayBuffer(base64) {
+        const binary = atob(base64);
+        const len = binary.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes.buffer;
+    }
+
     // Create key from password
     const createKey = async (password, salt) => {
         // Transform password to CryptoKey object
@@ -189,6 +215,10 @@ export default function Auth() {
         }
 
         const password = document.getElementById("login-passw").value;
+
+        // ! SIGNAL PROTOCOL IMPLEMENTATION VARIABLES
+        let prekeyBundle;
+        const opk = []; // One-time PreKeys
 
         // If new user, set criteria
         if (signup) {
@@ -293,7 +323,6 @@ export default function Auth() {
             }
 
             // Generating one-time prekeys
-            const opk = []; // One-time PreKeys
             const OPK_COUNT = 100;
 
             for (let i = 0; i < OPK_COUNT; i++) {
@@ -339,25 +368,21 @@ export default function Auth() {
             //     kyberPreKeyRecord.signature // Kyber public key signature
             // );
 
-            const prekeyBundle = {
+            prekeyBundle = {
                 registrationId: registrationId,
                 deviceId: 1,
-                preKey: {
-                    keyId: opk[0].keyId,
-                    publicKey: opk[0].keyPair.pubKey,
-                },
                 signedPreKey: {
                     keyId: signedPreKey.keyId,
-                    publicKey: signedPreKey.keyPair.pubKey,
-                    signature: signedPreKey.signature,
+                    publicKey: arrayBufferToBase64(signedPreKey.keyPair.pubKey),
+                    signature: arrayBufferToBase64(signedPreKey.signature),
                 },
-                identityKey: identityKey.pubKey,
+                identityKey: arrayBufferToBase64(identityKey.pubKey),
                 timestamp: timestamp,
             };
 
             console.log("PreKey Bundle created:", prekeyBundle);
 
-            // ! SIGNAL PROTOCOL IMPLEMENTATION ENDS HERE
+            // ! SIGNAL PROTOCOL IMPLEMENTATION STOPS HERE
         }
 
         // Check if password is empty
@@ -380,6 +405,7 @@ export default function Auth() {
             },
             body: JSON.stringify({
                 password: password,
+                keyBundle: signup ? prekeyBundle : null, // send prekey bundle if signing up
             }),
             credentials: "include",
         });
@@ -388,6 +414,7 @@ export default function Auth() {
 
         const res = await req.json();
         console.log(res);
+        setCSRFToken(res.csrfToken);
 
         // Handle response
         if (req.status !== 200) {
@@ -396,9 +423,46 @@ export default function Auth() {
             clearInterval(interval);
             document.getElementById("login-overlay").style.display = "none";
 
-            setCSRFToken(res.csrfToken);
             return;
         }
+
+        // ! SIGNAL PROTOCOL IMPLEMENTATION CONTINUES HERE
+        // Signup flow
+        // Upload One-time Prekeys to server
+        if (signup) {
+            const opkReq = await fetch(
+                "http://localhost:8080/auth/upload-prekeys",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-CSRF-Token": res.csrfToken,
+                    },
+                    body: JSON.stringify({
+                        prekeys: opk.map((pk) => ({
+                            keyId: pk.keyId,
+                            publicKey: arrayBufferToBase64(pk.keyPair.pubKey),
+                        })),
+                    }), // send one-time prekeys if signing up
+                    credentials: "include",
+                }
+            );
+
+            const opkRes = await opkReq.json();
+            if (opkReq.status !== 200) {
+                document.getElementById("login-error").innerText =
+                    "Failed to upload one-time prekeys! Please refresh and try again. (" +
+                    opkRes.error +
+                    ")";
+                clearInterval(interval);
+                document.getElementById("login-overlay").style.display = "none";
+                setCSRFToken(opkRes.csrfToken);
+                return;
+            }
+
+            console.log("One-time prekeys uploaded: " + opkRes.uploadedCount);
+        }
+        // ! SIGNAL PROTOCOL IMPLEMENTATION ENDS HERE
 
         let rsaKey;
         try {

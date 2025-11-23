@@ -3,6 +3,8 @@ import {
     checkIfUserExists,
     createCSRFToken,
     createUser,
+    uploadOneTimePrekeys,
+    uploadUserKeys,
     validateCSRFToken,
     validatePassword,
 } from "../helpers/auth.helpers.js";
@@ -48,15 +50,28 @@ const auth = async (req, res) => {
         return;
     }
 
-    // Create session
-    req.session.regenerate(() => {
-        req.session.googleID = user.userID;
-        req.session.email = user.email;
-        req.session.displayName = user.displayName;
-        req.session.name = user.name;
-        req.session.loggedIn = false;
-        req.session.save();
-    });
+    console.log("User:", user);
+    // Create session and ensure it's saved before responding
+    try {
+        await new Promise((resolve, reject) => {
+            req.session.regenerate((err) => {
+                if (err) return reject(err);
+                req.session.googleID = user.userID;
+                req.session.email = user.email;
+                req.session.displayName = user.displayName;
+                req.session.name = user.name;
+                req.session.loggedIn = false;
+                req.session.save((errSave) => {
+                    if (errSave) return reject(errSave);
+                    resolve();
+                });
+            });
+        });
+    } catch (err) {
+        console.error('Session regenerate/save failed', err);
+        res.status(500).send({ error: 'Session error', csrfToken: csrfToken });
+        return;
+    }
 
     // Check if user exists
     if (!(await checkIfUserExists(user.email))) {
@@ -80,6 +95,7 @@ const verifyPassword = async (req, res) => {
     if (!csrfToken) return;
 
     if (!req.session.email || req.session.loggedIn !== false) {
+        console.log(req.session.email, req.session.loggedIn);
         res.status(401).send({
             error: "Invalid session. Have you logged in?",
             csrfToken: csrfToken,
@@ -91,6 +107,15 @@ const verifyPassword = async (req, res) => {
     console.log(user);
     let id, priv_key, pssw_iv, salt;
     if (!user) {
+        // Check required fields for signal protocol
+        if (!req.body.keyBundle || !req.body.keyBundle.registrationId || !req.body.keyBundle.identityKey || !req.body.keyBundle.signedPreKey) {
+            res.status(400).send({
+                error: "Missing key bundle for new user",
+                csrfToken: csrfToken,
+            });
+            return;
+        }
+
         const created = await createUser(req.session, req.body.password);
         if (!created[0]) {
             res.status(500).send({
@@ -103,6 +128,16 @@ const verifyPassword = async (req, res) => {
         priv_key = created[1];
         pssw_iv = created[2];
         salt = created[3];
+        
+        // Upload key bundle (signal protocol)
+        const uploadRes = await uploadUserKeys(id, req.body.keyBundle);
+        if (!uploadRes) {
+            res.status(500).send({
+                error: "Failed to upload user keys. Try again.",
+                csrfToken: csrfToken,
+            });
+            return;
+        }
     } else {
         const allowed = await validatePassword(req.session.email, req.body.password);
         if (!allowed) {
@@ -128,4 +163,50 @@ const verifyPassword = async (req, res) => {
     });
 };
 
-export { generateCSRFToken, auth, verifyPassword };
+const uploadPreKeys = async (req, res) => {
+    const csrfToken = validateCSRFToken(req, res);
+    if (!csrfToken) return;
+
+    if (!req.body.prekeys || !Array.isArray(req.body.prekeys) || req.body.prekeys.length === 0) {
+        res.status(400).send({
+            error: "Invalid prekeys format.",
+            csrfToken: csrfToken,
+        });
+        return;
+    }
+
+    console.log(req.body.prekeys[0].publicKey);
+
+    if (!req.session.email || req.session.loggedIn !== true) {
+        res.status(401).send({
+            error: "Invalid session. Have you logged in?",
+            csrfToken: csrfToken,
+        });
+        return;
+    }
+
+    const user = await checkIfUserExists(req.session.email);
+    if (!user) {
+        res.status(401).send({
+            error: "User does not exist.",
+            csrfToken: csrfToken,
+        });
+        return;
+    }
+
+    const uploaded = await uploadOneTimePrekeys(user.id, req.body.prekeys);
+    if (!uploaded) {
+        res.status(500).send({
+            error: "Failed to upload one-time prekeys. Try again.",
+            csrfToken: csrfToken,
+        });
+        return;
+    }
+
+    res.status(200).send({
+        uploadedCount: uploaded,
+        csrfToken: csrfToken,
+    });
+}
+
+export { generateCSRFToken, auth, verifyPassword, uploadPreKeys };

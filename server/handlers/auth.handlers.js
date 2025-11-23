@@ -7,5 +7,6 @@ const router = Router();
 router.get("/csrf-token", auth.generateCSRFToken);
 router.post("/google", auth.auth);
 router.post("/verify", auth.verifyPassword);
+router.post("/upload-prekeys", auth.uploadPreKeys);
 
 export default router;

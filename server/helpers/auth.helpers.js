@@ -1,7 +1,8 @@
 import crypto, { pbkdf2 } from "crypto";
 import bcrypt from "bcrypt";
 
-import query from "../db/db.connect.js";
+import query, { pool } from "../db/db.connect.js";
+import format from "pg-format";
 
 const checkIfUserExists = async (email) => {
     const res = await query('SELECT * FROM "user" WHERE email = $1', [email]);
@@ -63,6 +64,35 @@ function buf2hex(buffer) {
         .join("");
 }
 
+function arrayBufferToBase64Node(ab) {
+    return Buffer.from(ab).toString("base64");
+}
+// Node: base64 -> ArrayBuffer
+function base64ToArrayBufferNode(b64) {
+    const buf = Buffer.from(b64, "base64");
+    return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+}
+
+// convert various incoming formats into Node Buffer
+const toBuffer = (pub) => {
+    if (Buffer.isBuffer(pub)) return pub;
+    if (typeof pub === "string") {
+        const s = pub.trim();
+        // detect hex (only hex chars, even length)
+        if (/^[0-9a-fA-F]+$/.test(s) && s.length % 2 === 0)
+            return Buffer.from(s, "hex");
+        // otherwise assume base64
+        return Buffer.from(s, "base64");
+    }
+    if (pub instanceof ArrayBuffer) return Buffer.from(new Uint8Array(pub));
+    if (pub instanceof Uint8Array) return Buffer.from(pub);
+    if (Array.isArray(pub)) return Buffer.from(pub);
+    // object shape like { data: [...] }
+    if (pub && typeof pub === "object" && Array.isArray(pub.data))
+        return Buffer.from(pub.data);
+    throw new TypeError("Unsupported publicKey format");
+};
+
 const createUser = async (user, password) => {
     // Get key from password
     const [key, saltPsswEncryption] = await createKey(password);
@@ -100,7 +130,10 @@ const createUser = async (user, password) => {
     }
 
     console.log("NAME " + buf2hex(name));
-    console.log("PRIV KEY " + buf2hex(await crypto.subtle.exportKey("pkcs8", rsa.privateKey)));
+    console.log(
+        "PRIV KEY " +
+            buf2hex(await crypto.subtle.exportKey("pkcs8", rsa.privateKey))
+    );
     console.log("PUB KEY " + buf2hex(public_key));
     console.log("IV " + typeof iv);
 
@@ -211,10 +244,59 @@ const validateCSRFToken = (req, res) => {
     return csrfToken;
 };
 
+const uploadUserKeys = async (userId, keyBundle) => {
+    const res = await query(
+        "INSERT INTO user_keys (user_id, device_id, registration_id, identity_key, spk_id, spk_public_key, spk_signature, timestamp) VALUES ($1, $2, $3, $4, $5, $6, $7, to_timestamp($8 / 1000.0)) RETURNING *",
+        [
+            userId,
+            keyBundle.deviceId || 1,
+            keyBundle.registrationId,
+            toBuffer(keyBundle.identityKey),
+            keyBundle.signedPreKey.keyId,
+            toBuffer(keyBundle.signedPreKey.publicKey),
+            toBuffer(keyBundle.signedPreKey.signature),
+            keyBundle.timestamp || Date.now(),
+        ]
+    );
+
+    return res.rows[0];
+};
+
+const uploadOneTimePrekeys = async (userId, preKeys) => {
+    if (!preKeys || !Array.isArray(preKeys) || preKeys.length === 0) return 0;
+
+    // Use a client from the pool for transaction
+    const client = await pool.connect(); // or import pool from db.connect.js if you exported it
+    try {
+        await client.query("BEGIN");
+
+        const insertText =
+            "INSERT INTO opk_keys (user_id, key_id, public_key) VALUES ($1, $2, $3)";
+        let inserted = 0;
+
+        for (const pk of preKeys) {
+            const buf = toBuffer(pk.publicKey);
+            await client.query(insertText, [userId, pk.keyId, buf]);
+            inserted++;
+        }
+
+        await client.query("COMMIT");
+        return inserted;
+    } catch (err) {
+        await client.query("ROLLBACK").catch(() => {});
+        console.error("uploadOneTimePrekeys failed", err);
+        throw err; // or return 0 depending on your error strategy
+    } finally {
+        client.release();
+    }
+};
+
 export {
     checkIfUserExists,
     createUser,
     createCSRFToken,
     validateCSRFToken,
     validatePassword,
+    uploadUserKeys,
+    uploadOneTimePrekeys,
 };
