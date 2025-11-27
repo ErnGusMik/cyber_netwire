@@ -9,6 +9,7 @@ import Input from "../../components/input/input";
 import Nav from "../../components/nav/nav";
 import { redirect, useSearchParams } from "react-router-dom";
 import { type } from "@testing-library/user-event/dist/type";
+import * as argon from "argon2-browser";
 
 export default function Auth() {
     const [signup, setSignup] = useState(false);
@@ -176,32 +177,57 @@ export default function Auth() {
     // Create key from password
     const createKey = async (password, salt) => {
         // Transform password to CryptoKey object
-        password = await window.crypto.subtle.importKey(
-            "raw",
-            new TextEncoder().encode(password),
-            "PBKDF2",
-            false,
-            ["deriveKey"]
-        );
+        // password = await window.crypto.subtle.importKey(
+        //     "raw",
+        //     new TextEncoder().encode(password),
+        //     "PBKDF2",
+        //     false,
+        //     ["deriveKey"]
+        // );
 
-        // Use the password to create a key using the PBKDF2 algorithm
-        // to be used by the AES-GCM algorithm
-        const key = await crypto.subtle.deriveKey(
-            {
-                name: "PBKDF2",
-                salt: hexToUint8Array(salt),
-                iterations: 100000,
-                hash: "SHA-256",
-            },
-            password,
-            {
-                name: "AES-GCM",
-                length: 256,
-            },
+        // // Use the password to create a key using the PBKDF2 algorithm
+        // // to be used by the AES-GCM algorithm
+        // const key = await crypto.subtle.deriveKey(
+        //     {
+        //         name: "PBKDF2",
+        //         salt: hexToUint8Array(salt),
+        //         iterations: 100000,
+        //         hash: "SHA-256",
+        //     },
+        //     password,
+        //     {
+        //         name: "AES-GCM",
+        //         length: 256,
+        //     },
+        //     false,
+        //     ["encrypt", "decrypt"]
+        // );
+        // return key;
+
+        const key = await argon.hash({
+            pass: password,
+            salt: salt,
+            type: argon.ArgonType.Argon2id,
+            hashLen: 32,
+            time: 3,
+            mem: 65536,
+            parallelism: 1,
+        });
+        const cryptoKey = await window.crypto.subtle.importKey(
+            "raw",
+            key.hash,
+            { name: "AES-GCM" },
             false,
             ["encrypt", "decrypt"]
         );
-        return key;
+        const hkdfKey = await window.crypto.subtle.importKey(
+            "raw",
+            key.hash,
+            { name: "HKDF" },
+            false,
+            ["deriveKey", "deriveBits"]
+        );
+        return [cryptoKey, hkdfKey];
     };
 
     // Handle password field & user creation
@@ -462,11 +488,12 @@ export default function Auth() {
 
             console.log("One-time prekeys uploaded: " + opkRes.uploadedCount);
         }
-        // ! SIGNAL PROTOCOL IMPLEMENTATION ENDS HERE
+        // ! SIGNAL PROTOCOL IMPLEMENTATION STOPS HERE
 
         let rsaKey;
+        const [key, hkdfKey] = await createKey(password, res.salt);
+
         try {
-            const key = await createKey(password, res.salt);
             console.log("Key created");
             const rsaKeyRaw = await window.crypto.subtle.decrypt(
                 {
@@ -498,6 +525,73 @@ export default function Auth() {
             document.getElementById("login-overlay").style.display = "none";
 
             setCSRFToken(res.csrfToken);
+        }
+
+        // ! SIGNAL IMPLEMENTATION CONTINUES HERE
+        // Signup flow
+        // HKDF-Expand to create separate keys for encryption and verification
+        if (signup) {
+            const verifierKey = await window.crypto.subtle.deriveKey(
+                {
+                    name: "HKDF",
+                    hash: "SHA-256",
+                    salt: res.salt,
+                    info: str2ab("E2E_PASSW_VERIFIER"),
+                },
+                hkdfKey,
+                { name: "HMAC", hash: "SHA-256", length: 256 },
+                false,
+                ["sign", "verify"]
+            );
+
+            const encKey = await window.crypto.subtle.deriveKey(
+                {
+                    name: "HKDF",
+                    hash: "SHA-256",
+                    salt: res.salt,
+                    info: str2ab("E2E_PASSW_ENC"),
+                },
+                hkdfKey,
+                { name: "AES-GCM", length: 256 },
+                false,
+                ["encrypt", "decrypt"]
+            );
+
+            const encryptedIdentityKey = await crypto.subtle.encrypt(
+                { name: "AES-GCM", iv: new Uint8Array(res.idkIV) },
+                encKey,
+                base64ToArrayBuffer(res.identityKey)
+            );
+
+            const spk = await crypto.subtle.encrypt(
+                { name: "AES-GCM", iv: new Uint8Array(res.spkIV) },
+                encKey,
+                base64ToArrayBuffer(res.signedPreKey)
+            );
+            const keyReq = await fetch(
+                "http://localhost:8080/auth/upload-privkeys",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-CSRF-Token": res.csrfToken,
+                    },
+                    body: JSON.stringify({
+                        identityKey: arrayBufferToBase64(
+                            encryptedIdentityKey
+                        ),
+                        signedPreKey: arrayBufferToBase64(spk),
+                        verifierKey: await window.crypto.subtle.exportKey(
+                            "raw",
+                            verifierKey
+                        ).then((buf) => arrayBufferToBase64(buf)),
+                    }),
+                }
+            ); // DO SERVER THEN RETURN
+
+            const keyRes = await keyReq.json();
+
+            console.log("Private keys uploaded: " + keyRes.rows);
         }
 
         // Set service worker

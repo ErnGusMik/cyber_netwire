@@ -3,6 +3,7 @@ import bcrypt from "bcrypt";
 
 import query, { pool } from "../db/db.connect.js";
 import format from "pg-format";
+import { argon2id } from "argon2";
 
 const checkIfUserExists = async (email) => {
     const res = await query('SELECT * FROM "user" WHERE email = $1', [email]);
@@ -11,33 +12,43 @@ const checkIfUserExists = async (email) => {
 };
 
 const createKey = async (password) => {
-    // Transform password to CryptoKey object
-    password = await crypto.subtle.importKey(
-        "raw",
-        Buffer.from(password),
-        "PBKDF2",
-        false,
-        ["deriveKey"]
-    );
+    // // Transform password to CryptoKey object
+    // password = await crypto.subtle.importKey(
+    //     "raw",
+    //     Buffer.from(password),
+    //     "PBKDF2",
+    //     false,
+    //     ["deriveKey"]
+    // );
+
+    // const salt = crypto.randomBytes(16);
+    // // Use the password to create a key using the PBKDF2 algorithm
+    // // to be used by the AES-GCM algorithm
+    // const key = await crypto.subtle.deriveKey(
+    //     {
+    //         name: "PBKDF2",
+    //         salt: salt,
+    //         iterations: 100000,
+    //         hash: "SHA-256",
+    //     },
+    //     password,
+    //     {
+    //         name: "AES-GCM",
+    //         length: 256,
+    //     },
+    //     false,
+    //     ["encrypt", "decrypt"]
+    // );
+    // return [key, salt];
 
     const salt = crypto.randomBytes(16);
-    // Use the password to create a key using the PBKDF2 algorithm
-    // to be used by the AES-GCM algorithm
-    const key = await crypto.subtle.deriveKey(
-        {
-            name: "PBKDF2",
-            salt: salt,
-            iterations: 100000,
-            hash: "SHA-256",
-        },
-        password,
-        {
-            name: "AES-GCM",
-            length: 256,
-        },
-        false,
-        ["encrypt", "decrypt"]
-    );
+    const key = await argon2id.hash(password, {
+        salt,
+        hashLength: 32,
+        timeCost: 3,
+        parallelism: 1,
+        memoryCost: 1 << 16,
+    });
     return [key, salt];
 };
 
@@ -291,6 +302,13 @@ const uploadOneTimePrekeys = async (userId, preKeys) => {
     }
 };
 
+const uploadPrivateKeys = async (userId, identityKey, signedPreKey) => {
+    const res = await query(
+        "INSERT INTO private_keys (user_id, identity_key, signed_prekey) VALUES ($1, $2, $3) RETURNING *",
+        [userId, toBuffer(identityKey), toBuffer(signedPreKey)]
+    );
+};
+
 export {
     checkIfUserExists,
     createUser,
@@ -299,4 +317,5 @@ export {
     validatePassword,
     uploadUserKeys,
     uploadOneTimePrekeys,
+    uploadPrivateKeys,
 };

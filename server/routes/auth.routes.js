@@ -4,12 +4,12 @@ import {
     createCSRFToken,
     createUser,
     uploadOneTimePrekeys,
+    uploadPrivateKeys,
     uploadUserKeys,
     validateCSRFToken,
     validatePassword,
 } from "../helpers/auth.helpers.js";
 import bcrypt from "bcrypt";
-
 
 // Create a new CSRF token
 const generateCSRFToken = (req, res) => {
@@ -68,8 +68,8 @@ const auth = async (req, res) => {
             });
         });
     } catch (err) {
-        console.error('Session regenerate/save failed', err);
-        res.status(500).send({ error: 'Session error', csrfToken: csrfToken });
+        console.error("Session regenerate/save failed", err);
+        res.status(500).send({ error: "Session error", csrfToken: csrfToken });
         return;
     }
 
@@ -108,7 +108,12 @@ const verifyPassword = async (req, res) => {
     let id, priv_key, pssw_iv, salt;
     if (!user) {
         // Check required fields for signal protocol
-        if (!req.body.keyBundle || !req.body.keyBundle.registrationId || !req.body.keyBundle.identityKey || !req.body.keyBundle.signedPreKey) {
+        if (
+            !req.body.keyBundle ||
+            !req.body.keyBundle.registrationId ||
+            !req.body.keyBundle.identityKey ||
+            !req.body.keyBundle.signedPreKey
+        ) {
             res.status(400).send({
                 error: "Missing key bundle for new user",
                 csrfToken: csrfToken,
@@ -128,7 +133,7 @@ const verifyPassword = async (req, res) => {
         priv_key = created[1];
         pssw_iv = created[2];
         salt = created[3];
-        
+
         // Upload key bundle (signal protocol)
         const uploadRes = await uploadUserKeys(id, req.body.keyBundle);
         if (!uploadRes) {
@@ -139,7 +144,10 @@ const verifyPassword = async (req, res) => {
             return;
         }
     } else {
-        const allowed = await validatePassword(req.session.email, req.body.password);
+        const allowed = await validatePassword(
+            req.session.email,
+            req.body.password
+        );
         if (!allowed) {
             res.status(401).send({
                 error: "Invalid password",
@@ -167,7 +175,11 @@ const uploadPreKeys = async (req, res) => {
     const csrfToken = validateCSRFToken(req, res);
     if (!csrfToken) return;
 
-    if (!req.body.prekeys || !Array.isArray(req.body.prekeys) || req.body.prekeys.length === 0) {
+    if (
+        !req.body.prekeys ||
+        !Array.isArray(req.body.prekeys) ||
+        req.body.prekeys.length === 0
+    ) {
         res.status(400).send({
             error: "Invalid prekeys format.",
             csrfToken: csrfToken,
@@ -207,6 +219,64 @@ const uploadPreKeys = async (req, res) => {
         uploadedCount: uploaded,
         csrfToken: csrfToken,
     });
-}
+};
 
-export { generateCSRFToken, auth, verifyPassword, uploadPreKeys };
+const uploadPrivKeys = async (req, res) => {
+    const csrfToken = validateCSRFToken(req, res);
+    if (!csrfToken) return;
+
+    if (
+        !req.body.identityKey ||
+        !req.body.signedPreKey ||
+        !req.body.signedPreKeySignature
+    ) {
+        res.status(400).send({
+            error: "Invalid private keys format.",
+            csrfToken: csrfToken,
+        });
+        return;
+    }
+
+    if (!req.session.email || req.session.loggedIn !== true) {
+        res.status(401).send({
+            error: "Invalid session. Have you logged in?",
+            csrfToken: csrfToken,
+        });
+        return;
+    }
+
+    const user = await checkIfUserExists(req.session.email);
+    if (!user) {
+        res.status(401).send({
+            error: "User does not exist.",
+            csrfToken: csrfToken,
+        });
+        return;
+    }
+
+    const uploaded = await uploadPrivateKeys(
+        user.id,
+        req.body.identityKey,
+        req.body.signedPreKey
+    );
+    if (!uploaded) {
+        res.status(500).send({
+            error: "Failed to upload private keys. Try again.",
+            csrfToken: csrfToken,
+        });
+        return;
+    }
+
+    res.status(200).send({
+        success: true,
+        csrfToken: csrfToken,
+    });
+};
+
+export {
+    generateCSRFToken,
+    auth,
+    verifyPassword,
+    uploadPreKeys,
+    uploadPrivKeys,
+};
