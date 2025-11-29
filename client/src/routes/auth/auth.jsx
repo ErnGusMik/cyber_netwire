@@ -9,7 +9,6 @@ import Input from "../../components/input/input";
 import Nav from "../../components/nav/nav";
 import { redirect, useSearchParams } from "react-router-dom";
 import { type } from "@testing-library/user-event/dist/type";
-import * as argon from "argon2-browser";
 
 export default function Auth() {
     const [signup, setSignup] = useState(false);
@@ -204,30 +203,31 @@ export default function Auth() {
         // );
         // return key;
 
-        const key = await argon.hash({
-            pass: password,
-            salt: salt,
-            type: argon.ArgonType.Argon2id,
-            hashLen: 32,
-            time: 3,
-            mem: 65536,
-            parallelism: 1,
-        });
-        const cryptoKey = await window.crypto.subtle.importKey(
-            "raw",
-            key.hash,
-            { name: "AES-GCM" },
-            false,
-            ["encrypt", "decrypt"]
-        );
-        const hkdfKey = await window.crypto.subtle.importKey(
-            "raw",
-            key.hash,
-            { name: "HKDF" },
-            false,
-            ["deriveKey", "deriveBits"]
-        );
-        return [cryptoKey, hkdfKey];
+        // const key = await argon.hash({
+        //     pass: password,
+        //     salt: salt,
+        //     type: argon.ArgonType.Argon2id,
+        //     hashLen: 32,
+        //     time: 3,
+        //     mem: 65536,
+        //     parallelism: 1,
+        // });
+        // const cryptoKey = await window.crypto.subtle.importKey(
+        //     "raw",
+        //     key.hash,
+        //     { name: "AES-GCM" },
+        //     false,
+        //     ["encrypt", "decrypt"]
+        // );
+        // const hkdfKey = await window.crypto.subtle.importKey(
+        //     "raw",
+        //     key.hash,
+        //     { name: "HKDF" },
+        //     false,
+        //     ["deriveKey", "deriveBits"]
+        // );
+        // return [cryptoKey, hkdfKey];
+        return;
     };
 
     // Handle password field & user creation
@@ -526,73 +526,72 @@ export default function Auth() {
 
             setCSRFToken(res.csrfToken);
         }
-
         // ! SIGNAL IMPLEMENTATION CONTINUES HERE
         // Signup flow
         // HKDF-Expand to create separate keys for encryption and verification
-        if (signup) {
-            const verifierKey = await window.crypto.subtle.deriveKey(
-                {
-                    name: "HKDF",
-                    hash: "SHA-256",
-                    salt: res.salt,
-                    info: str2ab("E2E_PASSW_VERIFIER"),
-                },
-                hkdfKey,
-                { name: "HMAC", hash: "SHA-256", length: 256 },
-                false,
-                ["sign", "verify"]
-            );
+        // if (signup) {
+        //     const verifierKey = await window.crypto.subtle.deriveKey(
+        //         {
+        //             name: "HKDF",
+        //             hash: "SHA-256",
+        //             salt: res.salt,
+        //             info: str2ab("E2E_PASSW_VERIFIER"),
+        //         },
+        //         hkdfKey,
+        //         { name: "HMAC", hash: "SHA-256", length: 256 },
+        //         false,
+        //         ["sign", "verify"]
+        //     );
 
-            const encKey = await window.crypto.subtle.deriveKey(
-                {
-                    name: "HKDF",
-                    hash: "SHA-256",
-                    salt: res.salt,
-                    info: str2ab("E2E_PASSW_ENC"),
-                },
-                hkdfKey,
-                { name: "AES-GCM", length: 256 },
-                false,
-                ["encrypt", "decrypt"]
-            );
+        //     const encKey = await window.crypto.subtle.deriveKey(
+        //         {
+        //             name: "HKDF",
+        //             hash: "SHA-256",
+        //             salt: res.salt,
+        //             info: str2ab("E2E_PASSW_ENC"),
+        //         },
+        //         hkdfKey,
+        //         { name: "AES-GCM", length: 256 },
+        //         false,
+        //         ["encrypt", "decrypt"]
+        //     );
 
-            const encryptedIdentityKey = await crypto.subtle.encrypt(
-                { name: "AES-GCM", iv: new Uint8Array(res.idkIV) },
-                encKey,
-                base64ToArrayBuffer(res.identityKey)
-            );
+        //     const encryptedIdentityKey = await crypto.subtle.encrypt(
+        //         { name: "AES-GCM", iv: new Uint8Array(res.idkIV) },
+        //         encKey,
+        //         base64ToArrayBuffer(res.identityKey)
+        //     );
 
-            const spk = await crypto.subtle.encrypt(
-                { name: "AES-GCM", iv: new Uint8Array(res.spkIV) },
-                encKey,
-                base64ToArrayBuffer(res.signedPreKey)
-            );
-            const keyReq = await fetch(
-                "http://localhost:8080/auth/upload-privkeys",
-                {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "X-CSRF-Token": res.csrfToken,
-                    },
-                    body: JSON.stringify({
-                        identityKey: arrayBufferToBase64(
-                            encryptedIdentityKey
-                        ),
-                        signedPreKey: arrayBufferToBase64(spk),
-                        verifierKey: await window.crypto.subtle.exportKey(
-                            "raw",
-                            verifierKey
-                        ).then((buf) => arrayBufferToBase64(buf)),
-                    }),
-                }
-            ); // DO SERVER THEN RETURN
+        //     const spk = await crypto.subtle.encrypt(
+        //         { name: "AES-GCM", iv: new Uint8Array(res.spkIV) },
+        //         encKey,
+        //         base64ToArrayBuffer(res.signedPreKey)
+        //     );
+        //     const keyReq = await fetch(
+        //         "http://localhost:8080/auth/upload-privkeys",
+        //         {
+        //             method: "POST",
+        //             headers: {
+        //                 "Content-Type": "application/json",
+        //                 "X-CSRF-Token": res.csrfToken,
+        //             },
+        //             body: JSON.stringify({
+        //                 identityKey: arrayBufferToBase64(
+        //                     encryptedIdentityKey
+        //                 ),
+        //                 signedPreKey: arrayBufferToBase64(spk),
+        //                 verifierKey: await window.crypto.subtle.exportKey(
+        //                     "raw",
+        //                     verifierKey
+        //                 ).then((buf) => arrayBufferToBase64(buf)),
+        //             }),
+        //         }
+        //     ); // DO SERVER THEN RETURN
 
-            const keyRes = await keyReq.json();
+        //     const keyRes = await keyReq.json();
 
-            console.log("Private keys uploaded: " + keyRes.rows);
-        }
+        //     console.log("Private keys uploaded: " + keyRes.rows);
+        // }
 
         // Set service worker
         navigator.serviceWorker.getRegistration("/").then((reg) => {
