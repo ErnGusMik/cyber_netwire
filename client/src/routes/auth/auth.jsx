@@ -10,6 +10,8 @@ import Nav from "../../components/nav/nav";
 import { redirect, useSearchParams } from "react-router-dom";
 import { type } from "@testing-library/user-event/dist/type";
 
+import { Argon2, Argon2Mode } from "@sphereon/isomorphic-argon2";
+
 export default function Auth() {
     const [signup, setSignup] = useState(false);
     const [google, setGoogle] = useState(false);
@@ -173,6 +175,18 @@ export default function Auth() {
         return bytes.buffer;
     }
 
+    // Accept either a base64 string or a BufferSource and return an ArrayBuffer
+    function ensureArrayBuffer(input) {
+        if (!input) return input;
+        if (typeof input === "string") return base64ToArrayBuffer(input);
+        if (input instanceof ArrayBuffer) return input;
+        if (ArrayBuffer.isView(input)) return input.buffer;
+        // object with { data: [...] }
+        if (input && typeof input === "object" && Array.isArray(input.data))
+            return new Uint8Array(input.data).buffer;
+        return input;
+    }
+
     // Create key from password
     const createKey = async (password, salt) => {
         // Transform password to CryptoKey object
@@ -203,31 +217,35 @@ export default function Auth() {
         // );
         // return key;
 
-        // const key = await argon.hash({
-        //     pass: password,
-        //     salt: salt,
-        //     type: argon.ArgonType.Argon2id,
-        //     hashLen: 32,
-        //     time: 3,
-        //     mem: 65536,
-        //     parallelism: 1,
-        // });
-        // const cryptoKey = await window.crypto.subtle.importKey(
-        //     "raw",
-        //     key.hash,
-        //     { name: "AES-GCM" },
-        //     false,
-        //     ["encrypt", "decrypt"]
-        // );
-        // const hkdfKey = await window.crypto.subtle.importKey(
-        //     "raw",
-        //     key.hash,
-        //     { name: "HKDF" },
-        //     false,
-        //     ["deriveKey", "deriveBits"]
-        // );
-        // return [cryptoKey, hkdfKey];
-        return;
+        const key = await Argon2.hash(password, Uint8Array.fromHex(salt), {
+            mode: Argon2Mode.Argon2id,
+            hashLength: 32,
+            memory: 65536,
+            parallelism: 1,
+            iterations: 3,
+        });
+        // Debug: log Argon2 output to help diagnose key/encoding issues
+        try {
+            console.log("Argon2 derived hex length:", key.hex?.length);
+            console.log("Argon2 hex snippet:", key.hex);
+        } catch (err) {
+            console.warn("Argon2 logging failed:", err);
+        }
+        const cryptoKey = await window.crypto.subtle.importKey(
+            "raw",
+            hexToUint8Array(key.hex),
+            { name: "AES-GCM" },
+            false,
+            ["encrypt", "decrypt"]
+        );
+        const hkdfKey = await window.crypto.subtle.importKey(
+            "raw",
+            hexToUint8Array(key.hex),
+            { name: "HKDF" },
+            false,
+            ["deriveKey", "deriveBits"]
+        );
+        return [cryptoKey, hkdfKey];
     };
 
     // Handle password field & user creation
@@ -244,6 +262,7 @@ export default function Auth() {
 
         // ! SIGNAL PROTOCOL IMPLEMENTATION VARIABLES
         let prekeyBundle;
+        let privateKeys = {}; // To store private keys for later upload
         const opk = []; // One-time PreKeys
 
         // If new user, set criteria
@@ -282,6 +301,7 @@ export default function Auth() {
             // Generate identity key pair
             const identityKey =
                 await libsignal.KeyHelper.generateIdentityKeyPair();
+            privateKeys.identityKey = identityKey.privKey;
 
             // Generating signed prekey
             const signedPrekeyId = Math.floor(Math.random() * 1e9); // stable unique id for this prekey
@@ -307,6 +327,7 @@ export default function Auth() {
                 identityKey,
                 signedPrekeyId
             );
+            privateKeys.signedPreKey = signedPreKey.keyPair.privKey;
 
             // Signature verification (libsignal official)
             // const ok = identityKey.publicKey.verify(
@@ -455,6 +476,7 @@ export default function Auth() {
         // ! SIGNAL PROTOCOL IMPLEMENTATION CONTINUES HERE
         // Signup flow
         // Upload One-time Prekeys to server
+        let opkCsrftoken;
         if (signup) {
             const opkReq = await fetch(
                 "http://localhost:8080/auth/upload-prekeys",
@@ -487,6 +509,8 @@ export default function Auth() {
             }
 
             console.log("One-time prekeys uploaded: " + opkRes.uploadedCount);
+            setCSRFToken(opkRes.csrfToken);
+            opkCsrftoken = opkRes.csrfToken;
         }
         // ! SIGNAL PROTOCOL IMPLEMENTATION STOPS HERE
 
@@ -495,12 +519,44 @@ export default function Auth() {
 
         try {
             console.log("Key created");
+            // Debug info for crypto inputs
+            try {
+                const ivBytes = new Uint8Array(
+                    res.psswIV.match(/../g).map((h) => parseInt(h, 16))
+                );
+                const privBytes = new Uint8Array(hexToUint8Array(res.privKey));
+                console.log(
+                    "DEBUG decrypt inputs -> iv.byteLength:",
+                    ivBytes.byteLength
+                );
+                console.log(
+                    "DEBUG decrypt inputs -> priv.byteLength:",
+                    privBytes.byteLength
+                );
+                console.log(
+                    "DEBUG iv hex sample:",
+                    Array.from(ivBytes.slice(0, 6))
+                        .map((b) => b.toString(16).padStart(2, "0"))
+                        .join("")
+                );
+                console.log(
+                    "DEBUG priv hex sample:",
+                    Array.from(privBytes.slice(0, 6))
+                        .map((b) => b.toString(16).padStart(2, "0"))
+                        .join("")
+                );
+                console.log("DEBUG res.salt:", res.salt?.slice?.(0, 32));
+                console.log("DEBUG crypto keys:", { key, hkdfKey });
+            } catch (err) {
+                console.warn("DEBUG logging failed:", err);
+            }
+
             const rsaKeyRaw = await window.crypto.subtle.decrypt(
                 {
                     name: "AES-GCM",
                     iv: new Uint8Array(
                         res.psswIV.match(/../g).map((h) => parseInt(h, 16))
-                    ).buffer,
+                    ),
                 },
                 key,
                 hexToUint8Array(res.privKey)
@@ -523,75 +579,80 @@ export default function Auth() {
             console.error(e);
             clearInterval(interval);
             document.getElementById("login-overlay").style.display = "none";
-
-            setCSRFToken(res.csrfToken);
         }
         // ! SIGNAL IMPLEMENTATION CONTINUES HERE
         // Signup flow
         // HKDF-Expand to create separate keys for encryption and verification
-        // if (signup) {
-        //     const verifierKey = await window.crypto.subtle.deriveKey(
-        //         {
-        //             name: "HKDF",
-        //             hash: "SHA-256",
-        //             salt: res.salt,
-        //             info: str2ab("E2E_PASSW_VERIFIER"),
-        //         },
-        //         hkdfKey,
-        //         { name: "HMAC", hash: "SHA-256", length: 256 },
-        //         false,
-        //         ["sign", "verify"]
-        //     );
+        if (signup) {
+            const verifierKey = await window.crypto.subtle.deriveKey(
+                {
+                    name: "HKDF",
+                    hash: "SHA-256",
+                    salt: hexToUint8Array(res.salt),
+                    info: str2ab("E2E_PASSW_VERIFIER"),
+                },
+                hkdfKey,
+                { name: "HMAC", hash: "SHA-256", length: 256 },
+                true,
+                ["sign", "verify"]
+            );
 
-        //     const encKey = await window.crypto.subtle.deriveKey(
-        //         {
-        //             name: "HKDF",
-        //             hash: "SHA-256",
-        //             salt: res.salt,
-        //             info: str2ab("E2E_PASSW_ENC"),
-        //         },
-        //         hkdfKey,
-        //         { name: "AES-GCM", length: 256 },
-        //         false,
-        //         ["encrypt", "decrypt"]
-        //     );
+            const encKey = await window.crypto.subtle.deriveKey(
+                {
+                    name: "HKDF",
+                    hash: "SHA-256",
+                    salt: hexToUint8Array(res.salt),
+                    info: str2ab("E2E_PASSW_ENC"),
+                },
+                hkdfKey,
+                { name: "AES-GCM", length: 256 },
+                false,
+                ["encrypt", "decrypt"]
+            );
 
-        //     const encryptedIdentityKey = await crypto.subtle.encrypt(
-        //         { name: "AES-GCM", iv: new Uint8Array(res.idkIV) },
-        //         encKey,
-        //         base64ToArrayBuffer(res.identityKey)
-        //     );
+            const idkIV = crypto.getRandomValues(new Uint8Array(12));
+            const spkIV = crypto.getRandomValues(new Uint8Array(12));
 
-        //     const spk = await crypto.subtle.encrypt(
-        //         { name: "AES-GCM", iv: new Uint8Array(res.spkIV) },
-        //         encKey,
-        //         base64ToArrayBuffer(res.signedPreKey)
-        //     );
-        //     const keyReq = await fetch(
-        //         "http://localhost:8080/auth/upload-privkeys",
-        //         {
-        //             method: "POST",
-        //             headers: {
-        //                 "Content-Type": "application/json",
-        //                 "X-CSRF-Token": res.csrfToken,
-        //             },
-        //             body: JSON.stringify({
-        //                 identityKey: arrayBufferToBase64(
-        //                     encryptedIdentityKey
-        //                 ),
-        //                 signedPreKey: arrayBufferToBase64(spk),
-        //                 verifierKey: await window.crypto.subtle.exportKey(
-        //                     "raw",
-        //                     verifierKey
-        //                 ).then((buf) => arrayBufferToBase64(buf)),
-        //             }),
-        //         }
-        //     ); // DO SERVER THEN RETURN
+            const encryptedIdentityKey = await crypto.subtle.encrypt(
+                { name: "AES-GCM", iv: new Uint8Array(idkIV) },
+                encKey,
+                ensureArrayBuffer(privateKeys.identityKey)
+            );
 
-        //     const keyRes = await keyReq.json();
+            const spk = await crypto.subtle.encrypt(
+                { name: "AES-GCM", iv: new Uint8Array(spkIV) },
+                encKey,
+                ensureArrayBuffer(privateKeys.signedPreKey)
+            );
+            console.log("Private keys encrypted for upload");
+            console.log(opkCsrftoken);
+            const keyReq = await fetch(
+                "http://localhost:8080/auth/upload-privkeys",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-CSRF-Token": opkCsrftoken,
+                    },
+                    body: JSON.stringify({
+                        identityKey: arrayBufferToBase64(encryptedIdentityKey),
+                        idkIV: arrayBufferToBase64(idkIV.buffer),
+                        signedPreKey: arrayBufferToBase64(spk),
+                        spkIV: arrayBufferToBase64(spkIV.buffer),
+                        verifierKey: await window.crypto.subtle
+                            .exportKey("raw", verifierKey)
+                            .then((buf) => arrayBufferToBase64(buf)),
+                    }),
+                    credentials: "include",
+                }
+            );
 
-        //     console.log("Private keys uploaded: " + keyRes.rows);
-        // }
+            const keyRes = await keyReq.json();
+
+            console.log("Private keys uploaded");
+        }
+
+        // ! SIGNAL IMPLEMENTATION STOPS HERE
 
         // Set service worker
         navigator.serviceWorker.getRegistration("/").then((reg) => {
@@ -604,7 +665,7 @@ export default function Auth() {
             if ("serviceWorker" in navigator) {
                 if (!rsaKey) {
                     document.getElementById("login-error").innerText =
-                        "Failed to decrypt private key! Plesae try again or use a different browser";
+                        "Failed to decrypt private key! Please try again or use a different browser";
                     clearInterval(interval);
                     document.getElementById("login-overlay").style.display =
                         "none";
@@ -623,6 +684,7 @@ export default function Auth() {
                             messageHandler
                         );
                         clearInterval(interval);
+                        console.log("all is well");
                         // localStorage.setItem("isAuthenticated", true);
                         // window.location.href = `/${
                         //     searchParams.get("redirect")

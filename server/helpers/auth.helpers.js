@@ -3,7 +3,7 @@ import bcrypt from "bcrypt";
 
 import query, { pool } from "../db/db.connect.js";
 import format from "pg-format";
-import { argon2id } from "argon2";
+import * as argon from "argon2";
 
 const checkIfUserExists = async (email) => {
     const res = await query('SELECT * FROM "user" WHERE email = $1', [email]);
@@ -42,13 +42,16 @@ const createKey = async (password) => {
     // return [key, salt];
 
     const salt = crypto.randomBytes(16);
-    const key = await argon2id.hash(password, {
-        salt,
+    const key = await argon.hash(password, {
+        salt: salt,
         hashLength: 32,
-        timeCost: 3,
         parallelism: 1,
-        memoryCost: 1 << 16,
+        memoryCost: 65536,
+        type: argon.argon2id,
+        iterations: 3,
+        raw: true,
     });
+
     return [key, salt];
 };
 
@@ -106,7 +109,15 @@ const toBuffer = (pub) => {
 
 const createUser = async (user, password) => {
     // Get key from password
-    const [key, saltPsswEncryption] = await createKey(password);
+    const [rawKey, saltPsswEncryption] = await createKey(password);
+
+    const key = await crypto.subtle.importKey(
+        "raw",
+        toBuffer(rawKey),
+        { name: "AES-GCM" },
+        false,
+        ["encrypt", "decrypt"]
+    );
 
     // Encrypt user data
     const iv = crypto.randomBytes(16);
@@ -114,7 +125,7 @@ const createUser = async (user, password) => {
     const name = await crypto.subtle.encrypt(
         { name: "AES-GCM", iv },
         key,
-        new ArrayBuffer(user.name)
+        Buffer.from(String(user.name), "utf8")
     );
 
     // Hash password (not related to encryption)
@@ -140,14 +151,6 @@ const createUser = async (user, password) => {
         user_no = Math.floor(Math.random() * 1000);
     }
 
-    console.log("NAME " + buf2hex(name));
-    console.log(
-        "PRIV KEY " +
-            buf2hex(await crypto.subtle.exportKey("pkcs8", rsa.privateKey))
-    );
-    console.log("PUB KEY " + buf2hex(public_key));
-    console.log("IV " + typeof iv);
-
     const values = [
         user.googleID,
         buf2hex(name),
@@ -161,7 +164,9 @@ const createUser = async (user, password) => {
         saltPsswEncryption.toString("hex"),
     ];
 
-    console.log(values);
+    // console.log(values);
+    // log raw key
+    console.log("Raw key:", buf2hex(rawKey));
 
     // Store user in database
     const dbRes = await query(
@@ -302,11 +307,21 @@ const uploadOneTimePrekeys = async (userId, preKeys) => {
     }
 };
 
-const uploadPrivateKeys = async (userId, identityKey, signedPreKey) => {
+const uploadPrivateKeys = async (userId, identityKey, signedPreKey, idkIV, spkIV) => {
     const res = await query(
-        "INSERT INTO private_keys (user_id, identity_key, signed_prekey) VALUES ($1, $2, $3) RETURNING *",
-        [userId, toBuffer(identityKey), toBuffer(signedPreKey)]
+        "INSERT INTO priv_keys (user_id, identity_key, signed_prekey, idk_iv, spk_iv) VALUES ($1, $2, $3, $4, $5) RETURNING *",
+        [userId, toBuffer(identityKey), toBuffer(signedPreKey), toBuffer(idkIV), toBuffer(spkIV)]
     );
+
+    return res.rows[0];
+};
+
+const addLibsignalVerifier = async (userId, verifierKey) => {
+    const res = await query(
+        'UPDATE "user" SET libsignal_verifier = $1 WHERE id = $2 RETURNING *',
+        [toBuffer(verifierKey), userId]
+    );
+    return res.rows[0];
 };
 
 export {
@@ -318,4 +333,5 @@ export {
     uploadUserKeys,
     uploadOneTimePrekeys,
     uploadPrivateKeys,
+    addLibsignalVerifier,
 };

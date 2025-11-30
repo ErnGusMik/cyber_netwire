@@ -12,6 +12,7 @@
   "dependencies": {
     "@privacyresearch/libsignal-protocol-typescript": "^0.0.16",
     "@signalapp/libsignal-client": "^0.86.4",
+    "@sphereon/isomorphic-argon2": "^1.0.1",
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^13.4.0",
     "@testing-library/user-event": "^13.5.0",

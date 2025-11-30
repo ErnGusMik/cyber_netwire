@@ -1,5 +1,6 @@
 import { OAuth2Client } from "google-auth-library";
 import {
+    addLibsignalVerifier,
     checkIfUserExists,
     createCSRFToken,
     createUser,
@@ -95,7 +96,6 @@ const verifyPassword = async (req, res) => {
     if (!csrfToken) return;
 
     if (!req.session.email || req.session.loggedIn !== false) {
-        console.log(req.session.email, req.session.loggedIn);
         res.status(401).send({
             error: "Invalid session. Have you logged in?",
             csrfToken: csrfToken,
@@ -104,7 +104,6 @@ const verifyPassword = async (req, res) => {
     }
 
     const user = await checkIfUserExists(req.session.email);
-    console.log(user);
     let id, priv_key, pssw_iv, salt;
     if (!user) {
         // Check required fields for signal protocol
@@ -187,7 +186,6 @@ const uploadPreKeys = async (req, res) => {
         return;
     }
 
-    console.log(req.body.prekeys[0].publicKey);
 
     if (!req.session.email || req.session.loggedIn !== true) {
         res.status(401).send({
@@ -228,7 +226,9 @@ const uploadPrivKeys = async (req, res) => {
     if (
         !req.body.identityKey ||
         !req.body.signedPreKey ||
-        !req.body.signedPreKeySignature
+        !req.body.idkIV ||
+        !req.body.spkIV ||
+        !req.body.verifierKey
     ) {
         res.status(400).send({
             error: "Invalid private keys format.",
@@ -257,11 +257,23 @@ const uploadPrivKeys = async (req, res) => {
     const uploaded = await uploadPrivateKeys(
         user.id,
         req.body.identityKey,
-        req.body.signedPreKey
+        req.body.signedPreKey,
+        req.body.idkIV,
+        req.body.spkIV
     );
     if (!uploaded) {
         res.status(500).send({
             error: "Failed to upload private keys. Try again.",
+            csrfToken: csrfToken,
+        });
+        return;
+    }
+
+    const addedVerifier = await addLibsignalVerifier(user.id, req.body.verifierKey);
+    
+    if (!addedVerifier) {
+        res.status(500).send({
+            error: "Failed to add verifier key. Try again.",
             csrfToken: csrfToken,
         });
         return;
