@@ -17,6 +17,7 @@ export default function Auth() {
     const [google, setGoogle] = useState(false);
     const [csrfToken, setCSRFToken] = useState("");
     const [name, setName] = useState("User");
+    const [verifierData, setVerifierData] = useState({});
     const searchParams = new URLSearchParams(window.location.search);
 
     const handleGoogleResponse = async (res) => {
@@ -58,6 +59,10 @@ export default function Auth() {
         setGoogle(true);
         setCSRFToken(res1.csrfToken);
         setName(res1.name);
+        setVerifierData({
+            salt: res1.salt,
+            password_iv: res1.passwordIV,
+        });
 
         // Show password input
         document.getElementById("passw-cont").style.display = "block";
@@ -229,6 +234,7 @@ export default function Auth() {
         let prekeyBundle;
         let privateKeys = {}; // To store private keys for later upload
         const opk = []; // One-time PreKeys
+        let signalVerifier;
 
         // If new user, set criteria
         if (signup) {
@@ -415,6 +421,27 @@ export default function Auth() {
         document.getElementById("login-overlay").style.display = "flex";
         const interval = createLoadAnimation();
 
+        // ! SIGNAL PROTOCOL IMPLEMENTATION CONTINUES HERE
+        if (!signup) {
+            const [_, hkdfKey] = await createKey(
+                password,
+                verifierData.salt
+            );
+            signalVerifier = await window.crypto.subtle.deriveKey(
+                {
+                    name: "HKDF",
+                    hash: "SHA-256",
+                    salt: hexToUint8Array(verifierData.salt),
+                    info: str2ab("E2E_PASSW_VERIFIER"),
+                },
+                hkdfKey,
+                { name: "HMAC", hash: "SHA-256", length: 256 },
+                true,
+                ["sign", "verify"]
+            );
+        }
+        // ! SIGNAL PROTOCOL IMPLEMENTATION STOPS HERE
+
         // Send password to server
         const req = await fetch("http://localhost:8080/auth/verify", {
             method: "POST",
@@ -423,7 +450,7 @@ export default function Auth() {
                 "X-CSRF-Token": csrfToken,
             },
             body: JSON.stringify({
-                password: password,
+                password: signup ? password : arrayBufferToBase64(await window.crypto.subtle.exportKey("raw", signalVerifier)), // send derived verifier if logging in
                 keyBundle: signup ? prekeyBundle : null, // send prekey bundle if signing up
             }),
             credentials: "include",

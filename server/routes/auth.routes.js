@@ -75,7 +75,8 @@ const auth = async (req, res) => {
     }
 
     // Check if user exists
-    if (!(await checkIfUserExists(user.email))) {
+    const dbUser = await checkIfUserExists(user.email);
+    if (!dbUser) {
         res.status(200).send({
             newUser: true,
             csrfToken: csrfToken,
@@ -88,6 +89,8 @@ const auth = async (req, res) => {
         newUser: false,
         csrfToken: csrfToken,
         name: user.displayName,
+        salt: dbUser.salt,
+        passwordIV: dbUser.password_iv,
     });
 };
 
@@ -145,7 +148,7 @@ const verifyPassword = async (req, res) => {
     } else {
         const allowed = await validatePassword(
             req.session.email,
-            req.body.password
+            req.body.password,
         );
         if (!allowed) {
             res.status(401).send({

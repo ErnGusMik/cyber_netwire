@@ -188,14 +188,15 @@ const createUser = async (user, password) => {
 };
 
 const validatePassword = async (email, password) => {
-    const res = await query('SELECT password FROM "user" WHERE email = $1', [
+    const res = await query('SELECT libsignal_verifier FROM "user" WHERE email = $1', [
         email,
     ]);
     if (res.rows.length === 0) {
         return false;
     }
+    const existingHash = res.rows[0].libsignal_verifier;
 
-    return await bcrypt.compare(password, res.rows[0].password);
+    return await bcrypt.compare(password, existingHash);
 };
 
 const createCSRFToken = (req, res) => {
@@ -317,9 +318,13 @@ const uploadPrivateKeys = async (userId, identityKey, signedPreKey, idkIV, spkIV
 };
 
 const addLibsignalVerifier = async (userId, verifierKey) => {
+    // hash verifierKey before storing (bcrypt)
+    const hashedVerifierKey = await bcrypt.hash(verifierKey, 10);
+    console.log("Hashed verifier key:", hashedVerifierKey);
+
     const res = await query(
         'UPDATE "user" SET libsignal_verifier = $1 WHERE id = $2 RETURNING *',
-        [toBuffer(verifierKey), userId]
+        [hashedVerifierKey, userId]
     );
     return res.rows[0];
 };
