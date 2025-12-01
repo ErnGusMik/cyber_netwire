@@ -187,36 +187,8 @@ export default function Auth() {
         return input;
     }
 
-    // Create key from password
+    // Create key from password using Argon2id
     const createKey = async (password, salt) => {
-        // Transform password to CryptoKey object
-        // password = await window.crypto.subtle.importKey(
-        //     "raw",
-        //     new TextEncoder().encode(password),
-        //     "PBKDF2",
-        //     false,
-        //     ["deriveKey"]
-        // );
-
-        // // Use the password to create a key using the PBKDF2 algorithm
-        // // to be used by the AES-GCM algorithm
-        // const key = await crypto.subtle.deriveKey(
-        //     {
-        //         name: "PBKDF2",
-        //         salt: hexToUint8Array(salt),
-        //         iterations: 100000,
-        //         hash: "SHA-256",
-        //     },
-        //     password,
-        //     {
-        //         name: "AES-GCM",
-        //         length: 256,
-        //     },
-        //     false,
-        //     ["encrypt", "decrypt"]
-        // );
-        // return key;
-
         const key = await Argon2.hash(password, Uint8Array.fromHex(salt), {
             mode: Argon2Mode.Argon2id,
             hashLength: 32,
@@ -224,13 +196,6 @@ export default function Auth() {
             parallelism: 1,
             iterations: 3,
         });
-        // Debug: log Argon2 output to help diagnose key/encoding issues
-        try {
-            console.log("Argon2 derived hex length:", key.hex?.length);
-            console.log("Argon2 hex snippet:", key.hex);
-        } catch (err) {
-            console.warn("Argon2 logging failed:", err);
-        }
         const cryptoKey = await window.crypto.subtle.importKey(
             "raw",
             hexToUint8Array(key.hex),
@@ -267,6 +232,7 @@ export default function Auth() {
 
         // If new user, set criteria
         if (signup) {
+            console.log("[INFO][SIGNUP] User is new: using signup flow");
             if (password.length < 8) {
                 document.getElementById("login-error").innerText =
                     "Password must be at least 8 characters long!";
@@ -295,6 +261,7 @@ export default function Auth() {
 
             // ! SIGNAL PROTOCOL IMPLEMENTATION STARTS HERE
             // Signup flow
+            console.log("[INFO][SIGNUP] Generating Signal Protocol keys");
             // Generate registration ID
             const registrationId = libsignal.KeyHelper.generateRegistrationId();
 
@@ -338,12 +305,6 @@ export default function Auth() {
             // Signed pre-key signature verification
             const lib = await libsignal.default(); // Returns a Curve instance object
             // basic sanity checks (helpful debugging)
-            console.log(
-                "lens:",
-                identityKey.pubKey?.byteLength,
-                signedPreKey.keyPair?.pubKey?.byteLength,
-                signedPreKey.signature?.byteLength
-            );
 
             // Use the async verifier and treat "no throw" as valid
             let verified = false;
@@ -357,13 +318,22 @@ export default function Auth() {
                 // If we reached here, verification succeeded
                 verified = true;
             } catch (err) {
-                console.error("Signature verification failed:", err);
+                console.error(
+                    "[ERROR][SIGNUP] Signature verification failed:",
+                    err
+                );
                 verified = false;
             }
 
-            console.log("Signed PreKey signature valid:", verified);
-
+            console.log(
+                "[INFO][SIGNUP] Signed PreKey signature valid:",
+                verified,
+                ". Generating One-time PreKeys. This may take a while..."
+            );
             if (!verified) {
+                console.error(
+                    "[ERROR][SIGNUP] Signed PreKey signature verification failed. Keys need to be regenerated."
+                );
                 document.getElementById("login-error").innerText =
                     "Failed to securely create your account! Signature verification failed.";
                 return;
@@ -427,7 +397,9 @@ export default function Auth() {
                 timestamp: timestamp,
             };
 
-            console.log("PreKey Bundle created:", prekeyBundle);
+            console.log(
+                "[INFO][SIGNUP] Required Signal Protocol data generated. Verifying password & public key bundle..."
+            );
 
             // ! SIGNAL PROTOCOL IMPLEMENTATION STOPS HERE
         }
@@ -457,14 +429,14 @@ export default function Auth() {
             credentials: "include",
         });
 
-        console.log("Password verification: " + req.statusText);
-
         const res = await req.json();
-        console.log(res);
         setCSRFToken(res.csrfToken);
 
         // Handle response
         if (req.status !== 200) {
+            console.error(
+                "[ERROR][LOGIN] Failed to log in! Status: " + req.statusText
+            );
             document.getElementById("login-error").innerText =
                 "Failed to log in! Please try again. (" + req.statusText + ")";
             clearInterval(interval);
@@ -478,6 +450,9 @@ export default function Auth() {
         // Upload One-time Prekeys to server
         let opkCsrftoken;
         if (signup) {
+            console.log(
+                "[INFO][SIGNUP] Uploading one-time prekeys to server... (will take a while, don't refresh!)"
+            );
             const opkReq = await fetch(
                 "http://localhost:8080/auth/upload-prekeys",
                 {
@@ -498,6 +473,10 @@ export default function Auth() {
 
             const opkRes = await opkReq.json();
             if (opkReq.status !== 200) {
+                console.error(
+                    "[ERROR][SIGNUP] Failed to upload one-time prekeys! Status: " +
+                        opkReq.statusText
+                );
                 document.getElementById("login-error").innerText =
                     "Failed to upload one-time prekeys! Please refresh and try again. (" +
                     opkRes.error +
@@ -508,49 +487,16 @@ export default function Auth() {
                 return;
             }
 
-            console.log("One-time prekeys uploaded: " + opkRes.uploadedCount);
             setCSRFToken(opkRes.csrfToken);
             opkCsrftoken = opkRes.csrfToken;
         }
         // ! SIGNAL PROTOCOL IMPLEMENTATION STOPS HERE
 
+        console.log("[INFO][LOGIN] Decrypting legacy private key...");
         let rsaKey;
         const [key, hkdfKey] = await createKey(password, res.salt);
 
         try {
-            console.log("Key created");
-            // Debug info for crypto inputs
-            try {
-                const ivBytes = new Uint8Array(
-                    res.psswIV.match(/../g).map((h) => parseInt(h, 16))
-                );
-                const privBytes = new Uint8Array(hexToUint8Array(res.privKey));
-                console.log(
-                    "DEBUG decrypt inputs -> iv.byteLength:",
-                    ivBytes.byteLength
-                );
-                console.log(
-                    "DEBUG decrypt inputs -> priv.byteLength:",
-                    privBytes.byteLength
-                );
-                console.log(
-                    "DEBUG iv hex sample:",
-                    Array.from(ivBytes.slice(0, 6))
-                        .map((b) => b.toString(16).padStart(2, "0"))
-                        .join("")
-                );
-                console.log(
-                    "DEBUG priv hex sample:",
-                    Array.from(privBytes.slice(0, 6))
-                        .map((b) => b.toString(16).padStart(2, "0"))
-                        .join("")
-                );
-                console.log("DEBUG res.salt:", res.salt?.slice?.(0, 32));
-                console.log("DEBUG crypto keys:", { key, hkdfKey });
-            } catch (err) {
-                console.warn("DEBUG logging failed:", err);
-            }
-
             const rsaKeyRaw = await window.crypto.subtle.decrypt(
                 {
                     name: "AES-GCM",
@@ -561,7 +507,6 @@ export default function Auth() {
                 key,
                 hexToUint8Array(res.privKey)
             );
-            console.log("RSA key decrypted");
             rsaKey = await window.crypto.subtle.importKey(
                 "pkcs8",
                 rsaKeyRaw,
@@ -572,8 +517,9 @@ export default function Auth() {
                 true, //! change
                 ["decrypt"]
             );
-            console.log("RSA key imported");
+            console.log("[INFO][LOGIN] Legacy private key ready.");
         } catch (e) {
+            console.error("[ERROR][LOGIN] Failed to decrypt legacy private key:", e);
             document.getElementById("login-error").innerText =
                 "Failed to decrypt private key! Plesae try again or use a different browser";
             console.error(e);
@@ -584,6 +530,7 @@ export default function Auth() {
         // Signup flow
         // HKDF-Expand to create separate keys for encryption and verification
         if (signup) {
+            console.log("[INFO][SIGNUP] Prepping Signal Protocol private keys for storage...");
             const verifierKey = await window.crypto.subtle.deriveKey(
                 {
                     name: "HKDF",
@@ -624,7 +571,7 @@ export default function Auth() {
                 encKey,
                 ensureArrayBuffer(privateKeys.signedPreKey)
             );
-            console.log("Private keys encrypted for upload");
+            console.log("[INFO][SIGNUP] Securely storing Signal Protocol private keys...");
             console.log(opkCsrftoken);
             const keyReq = await fetch(
                 "http://localhost:8080/auth/upload-privkeys",
@@ -647,9 +594,22 @@ export default function Auth() {
                 }
             );
 
-            const keyRes = await keyReq.json();
+            if (keyReq.status !== 200) {
+                const keyRes = await keyReq.json();
+                console.error(
+                    "[ERROR][SIGNUP] Failed to upload private keys! Status: " +
+                        keyReq.statusText
+                );
+                document.getElementById("login-error").innerText =
+                    "Failed to store private keys! Please refresh and try again. (" +
+                    keyRes.error +
+                    ")";
+                clearInterval(interval);
+                document.getElementById("login-overlay").style.display = "none";
+                setCSRFToken(keyRes.csrfToken);
+                return;
+            }
 
-            console.log("Private keys uploaded");
         }
 
         // ! SIGNAL IMPLEMENTATION STOPS HERE
@@ -664,6 +624,7 @@ export default function Auth() {
         try {
             if ("serviceWorker" in navigator) {
                 if (!rsaKey) {
+                    console.error("[ERROR][LOGIN] Cannot proceed. Legacy private key is undefined.");
                     document.getElementById("login-error").innerText =
                         "Failed to decrypt private key! Please try again or use a different browser";
                     clearInterval(interval);
@@ -676,22 +637,21 @@ export default function Auth() {
 
                 // Listen for response
                 const messageHandler = (event) => {
-                    console.log("Message from service worker:", event.data);
                     if (event.data.type === "success") {
-                        console.log("Key set successfully");
+                        console.log("[INFO][LOGIN] Key setup successful in Service Worker.");
                         navigator.serviceWorker.controller.removeEventListener(
                             "message",
                             messageHandler
                         );
                         clearInterval(interval);
-                        console.log("all is well");
+                        console.log("[INFO][LOGIN] Process complete. Redirecting...");
                         // localStorage.setItem("isAuthenticated", true);
                         // window.location.href = `/${
                         //     searchParams.get("redirect")
                         //         ? searchParams.get("redirect")
                         //         : "home"
                         // }`;
-                    }
+                    } else console.log("[ERROR][LOGIN] Key setup failed in Service Worker");
                 };
 
                 navigator.serviceWorker.addEventListener(
@@ -704,25 +664,8 @@ export default function Auth() {
                         type: "setKey",
                         key: rsaKey,
                     });
-                    //
-                    //!
-                    //
-                    function buf2hex(buffer) {
-                        // buffer is an ArrayBuffer
-                        return [...new Uint8Array(buffer)]
-                            .map((x) => x.toString(16).padStart(2, "0"))
-                            .join("");
-                    }
-                    const exportedkey = await crypto.subtle.exportKey(
-                        "pkcs8",
-                        rsaKey
-                    );
-                    console.log(buf2hex(exportedkey));
-                    //
-                    //!
-                    //
                 });
-
+                console.log("[INFO][LOGIN] Service Worker registered. Awaiting key setup...");
                 return;
             }
             throw new Error("Service Worker not supported");
