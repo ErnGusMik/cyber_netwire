@@ -4,6 +4,7 @@ import {
     checkIfUserExists,
     createCSRFToken,
     createUser,
+    loadPrivateKeys,
     uploadOneTimePrekeys,
     uploadPrivateKeys,
     uploadUserKeys,
@@ -108,6 +109,7 @@ const verifyPassword = async (req, res) => {
 
     const user = await checkIfUserExists(req.session.email);
     let id, priv_key, pssw_iv, salt;
+    let signalKeys = {};
     if (!user) {
         // Check required fields for signal protocol
         if (
@@ -157,6 +159,17 @@ const verifyPassword = async (req, res) => {
             });
             return;
         }
+
+        // Signal protocol: load private keys for existing user
+        const privKeys = await loadPrivateKeys(user.id);
+        if (!privKeys) {
+            res.status(500).send({
+                error: "Failed to load private keys. Try again.",
+                csrfToken: csrfToken,
+            });
+            return;
+        }
+        signalKeys = privKeys;
     }
 
     req.session.loggedIn = true;
@@ -170,6 +183,10 @@ const verifyPassword = async (req, res) => {
         privKey: user ? user.priv_key : priv_key,
         psswIV: user ? user.password_iv : pssw_iv,
         salt: user ? user.salt : salt,
+        identityKey: signalKeys.identity_key || null,
+        signedPreKey: signalKeys.signed_prekey || null,
+        idkIV: signalKeys.idk_iv || null,
+        spkIV: signalKeys.spk_iv || null,
     });
 };
 

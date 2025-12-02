@@ -329,6 +329,23 @@ const addLibsignalVerifier = async (userId, verifierKey) => {
     return res.rows[0];
 };
 
+const loadPrivateKeys = async (userId) => {
+    const res = await query(
+        "SELECT * FROM priv_keys WHERE user_id = $1",
+        [userId]
+    );
+    if (res.rows.length === 0) {
+        return null;
+    }
+    const keys = {
+        identity_key: arrayBufferToBase64Node(res.rows[0].identity_key),
+        signed_prekey: arrayBufferToBase64Node(res.rows[0].signed_prekey),
+        idk_iv: arrayBufferToBase64Node(res.rows[0].idk_iv),
+        spk_iv: arrayBufferToBase64Node(res.rows[0].spk_iv),
+    }
+    return keys;
+}
+
 export {
     checkIfUserExists,
     createUser,
@@ -339,4 +356,5 @@ export {
     uploadOneTimePrekeys,
     uploadPrivateKeys,
     addLibsignalVerifier,
+    loadPrivateKeys
 };

@@ -422,11 +422,9 @@ export default function Auth() {
         const interval = createLoadAnimation();
 
         // ! SIGNAL PROTOCOL IMPLEMENTATION CONTINUES HERE
+        // Login flow
         if (!signup) {
-            const [_, hkdfKey] = await createKey(
-                password,
-                verifierData.salt
-            );
+            const [_, hkdfKey] = await createKey(password, verifierData.salt);
             signalVerifier = await window.crypto.subtle.deriveKey(
                 {
                     name: "HKDF",
@@ -450,13 +448,21 @@ export default function Auth() {
                 "X-CSRF-Token": csrfToken,
             },
             body: JSON.stringify({
-                password: signup ? password : arrayBufferToBase64(await window.crypto.subtle.exportKey("raw", signalVerifier)), // send derived verifier if logging in
+                password: signup
+                    ? password
+                    : arrayBufferToBase64(
+                          await window.crypto.subtle.exportKey(
+                              "raw",
+                              signalVerifier
+                          )
+                      ), // send derived verifier if logging in
                 keyBundle: signup ? prekeyBundle : null, // send prekey bundle if signing up
             }),
             credentials: "include",
         });
 
         const res = await req.json();
+        console.log(res);
         setCSRFToken(res.csrfToken);
 
         // Handle response
@@ -546,7 +552,10 @@ export default function Auth() {
             );
             console.log("[INFO][LOGIN] Legacy private key ready.");
         } catch (e) {
-            console.error("[ERROR][LOGIN] Failed to decrypt legacy private key:", e);
+            console.error(
+                "[ERROR][LOGIN] Failed to decrypt legacy private key:",
+                e
+            );
             document.getElementById("login-error").innerText =
                 "Failed to decrypt private key! Plesae try again or use a different browser";
             console.error(e);
@@ -554,36 +563,43 @@ export default function Auth() {
             document.getElementById("login-overlay").style.display = "none";
         }
         // ! SIGNAL IMPLEMENTATION CONTINUES HERE
-        // Signup flow
+        // Signup & login flow
         // HKDF-Expand to create separate keys for encryption and verification
+        console.log(
+            "[INFO][SIGNUP] Prepping Signal Protocol private keys for storage..."
+        );
+        const verifierKey = await window.crypto.subtle.deriveKey(
+            {
+                name: "HKDF",
+                hash: "SHA-256",
+                salt: hexToUint8Array(res.salt),
+                info: str2ab("E2E_PASSW_VERIFIER"),
+            },
+            hkdfKey,
+            { name: "HMAC", hash: "SHA-256", length: 256 },
+            true,
+            ["sign", "verify"]
+        );
+
+        const encKey = await window.crypto.subtle.deriveKey(
+            {
+                name: "HKDF",
+                hash: "SHA-256",
+                salt: hexToUint8Array(res.salt),
+                info: str2ab("E2E_PASSW_ENC"),
+            },
+            hkdfKey,
+            { name: "AES-GCM", length: 256 },
+            false,
+            ["encrypt", "decrypt"]
+        );
+
+        // Variables for signal keys storage
+        let id_key, spk_key;
+
         if (signup) {
-            console.log("[INFO][SIGNUP] Prepping Signal Protocol private keys for storage...");
-            const verifierKey = await window.crypto.subtle.deriveKey(
-                {
-                    name: "HKDF",
-                    hash: "SHA-256",
-                    salt: hexToUint8Array(res.salt),
-                    info: str2ab("E2E_PASSW_VERIFIER"),
-                },
-                hkdfKey,
-                { name: "HMAC", hash: "SHA-256", length: 256 },
-                true,
-                ["sign", "verify"]
-            );
-
-            const encKey = await window.crypto.subtle.deriveKey(
-                {
-                    name: "HKDF",
-                    hash: "SHA-256",
-                    salt: hexToUint8Array(res.salt),
-                    info: str2ab("E2E_PASSW_ENC"),
-                },
-                hkdfKey,
-                { name: "AES-GCM", length: 256 },
-                false,
-                ["encrypt", "decrypt"]
-            );
-
+            // Signup flow
+            // Encrypt private keys before uploading
             const idkIV = crypto.getRandomValues(new Uint8Array(12));
             const spkIV = crypto.getRandomValues(new Uint8Array(12));
 
@@ -598,7 +614,9 @@ export default function Auth() {
                 encKey,
                 ensureArrayBuffer(privateKeys.signedPreKey)
             );
-            console.log("[INFO][SIGNUP] Securely storing Signal Protocol private keys...");
+            console.log(
+                "[INFO][SIGNUP] Securely storing Signal Protocol private keys..."
+            );
             console.log(opkCsrftoken);
             const keyReq = await fetch(
                 "http://localhost:8080/auth/upload-privkeys",
@@ -636,75 +654,264 @@ export default function Auth() {
                 setCSRFToken(keyRes.csrfToken);
                 return;
             }
+        } else {
+            // Login flow
+            // Decrypt private keys from server response
+            const decryptedIdentityKey = await crypto.subtle.decrypt(
+                {
+                    name: "AES-GCM",
+                    iv: ensureArrayBuffer(res.idkIV),
+                },
+                encKey,
+                ensureArrayBuffer(res.identityKey)
+            );
+            const decryptedSignedPreKey = await crypto.subtle.decrypt(
+                {
+                    name: "AES-GCM",
+                    iv: ensureArrayBuffer(res.spkIV),
+                },
+                encKey,
+                ensureArrayBuffer(res.signedPreKey)
+            );
 
+            id_key = decryptedIdentityKey;
+            spk_key = decryptedSignedPreKey;
         }
+
+        // Create an instance of indexedDB to store keys locally
+        let db,
+            successfullyStored = false;
+        const openRequest = window.indexedDB.open("cyber_netwire_libsignal");
+
+        openRequest.onsuccess = (event) => {
+            db = event.target.result;
+
+            // Ensure required object stores exist. If not, close and reopen with a version bump
+            const needsUpgrade =
+                !db.objectStoreNames.contains("identityKey") ||
+                !db.objectStoreNames.contains("signedPreKey");
+
+            // Function to store keys
+            const storeKeys = (database) => {
+                try {
+                    const tx = database.transaction(
+                        ["identityKey", "signedPreKey"],
+                        "readwrite"
+                    );
+                    const idStore = tx.objectStore("identityKey");
+                    const spkStore = tx.objectStore("signedPreKey");
+
+                    idStore.put({
+                        id: "identityKey",
+                        key: ensureArrayBuffer(
+                            signup ? privateKeys.identityKey : id_key
+                        ),
+                    });
+
+                    spkStore.put({
+                        id: "signedPreKey",
+                        key: ensureArrayBuffer(
+                            signup ? privateKeys.signedPreKey : spk_key
+                        ),
+                    });
+
+                    tx.oncomplete = () => {
+                        console.log(
+                            "[INFO][LOGIN] Signal Protocol private keys stored successfully."
+                        );
+                        // Proceed to service worker setup
+                        serviceWorkerSetup();
+                    };
+
+                    tx.onerror = (err) => {
+                        console.error(
+                            "[ERROR][LOGIN] Failed to store Signal Protocol keys:",
+                            err
+                        );
+                    };
+                } catch (err) {
+                    console.error(
+                        "[ERROR][LOGIN] IndexedDB transaction error while storing keys:",
+                        err
+                    );
+                }
+            };
+
+            // If upgrade needed, do it
+            if (needsUpgrade) {
+                // Close current connection and open with a bumped version to create missing stores
+                const nextVersion = db.version + 1;
+                db.close();
+                const upgradeReq = window.indexedDB.open(
+                    "cyber_netwire_libsignal",
+                    nextVersion
+                );
+
+                upgradeReq.onupgradeneeded = (ev) => {
+                    const upgradeDb = ev.target.result;
+                    if (!upgradeDb.objectStoreNames.contains("identityKey")) {
+                        upgradeDb.createObjectStore("identityKey", {
+                            keyPath: "id",
+                        });
+                    }
+                    if (!upgradeDb.objectStoreNames.contains("signedPreKey")) {
+                        upgradeDb.createObjectStore("signedPreKey", {
+                            keyPath: "id",
+                        });
+                    }
+                };
+
+                upgradeReq.onsuccess = (ev) => {
+                    db = ev.target.result;
+                    storeKeys(db);
+                };
+
+                upgradeReq.onerror = (ev) => {
+                    console.error(
+                        "[ERROR][LOGIN] Failed to upgrade IndexedDB to create object stores:",
+                        ev.target.error
+                    );
+                };
+            } else {
+                storeKeys(db);
+            }
+        };
+
+        openRequest.onerror = (event) => {
+            console.error(
+                "[ERROR][LOGIN] Failed to create IndexedDB instance for libsignal:",
+                event.target.errorCode
+            );
+            alert(
+                "We understand you are worried about your privacy, but we require indexedDB to securely store your encryption keys locally. Please enable it in your browser settings and try again."
+            );
+            return;
+        };
+
+        openRequest.onupgradeneeded = (event) => {
+            db = event.target.result;
+            // Create object stores
+            const idStore = db.createObjectStore("identityKey", {
+                keyPath: "id",
+            });
+
+            const spkStore = db.createObjectStore("signedPreKey", {
+                keyPath: "id",
+            });
+
+            console.log(
+                "[INFO][LOGIN] IndexedDB object stores for libsignal created/verified successfully."
+            );
+
+            // Error handling
+            idStore.onerror = (event) => {
+                console.error(
+                    "[ERROR][LOGIN] Failed to create identityKey object store:",
+                    event.target.errorCode
+                );
+                alert(
+                    "We understand you are worried about your privacy, but we require indexedDB to securely store your encryption keys locally. Please enable it in your browser settings and try again."
+                );
+                return;
+            };
+
+            spkStore.onerror = (event) => {
+                console.error(
+                    "[ERROR][LOGIN] Failed to create signedPreKey object store:",
+                    event.target.errorCode
+                );
+                alert(
+                    "We understand you are worried about your privacy, but we require indexedDB to securely store your encryption keys locally. Please enable it in your browser settings and try again."
+                );
+                return;
+            };
+        };
 
         // ! SIGNAL IMPLEMENTATION STOPS HERE
 
-        // Set service worker
-        navigator.serviceWorker.getRegistration("/").then((reg) => {
-            reg.active.postMessage({
-                test: "test",
-            });
-        });
-
-        try {
-            if ("serviceWorker" in navigator) {
-                if (!rsaKey) {
-                    console.error("[ERROR][LOGIN] Cannot proceed. Legacy private key is undefined.");
-                    document.getElementById("login-error").innerText =
-                        "Failed to decrypt private key! Please try again or use a different browser";
-                    clearInterval(interval);
-                    document.getElementById("login-overlay").style.display =
-                        "none";
-
-                    setCSRFToken(res.csrfToken);
-                    return;
-                }
-
-                // Listen for response
-                const messageHandler = (event) => {
-                    if (event.data.type === "success") {
-                        console.log("[INFO][LOGIN] Key setup successful in Service Worker.");
-                        navigator.serviceWorker.controller.removeEventListener(
-                            "message",
-                            messageHandler
-                        );
-                        clearInterval(interval);
-                        console.log("[INFO][LOGIN] Process complete. Redirecting...");
-                        // localStorage.setItem("isAuthenticated", true);
-                        // window.location.href = `/${
-                        //     searchParams.get("redirect")
-                        //         ? searchParams.get("redirect")
-                        //         : "home"
-                        // }`;
-                    } else console.log("[ERROR][LOGIN] Key setup failed in Service Worker");
-                };
-
-                navigator.serviceWorker.addEventListener(
-                    "message",
-                    messageHandler
-                );
-
-                navigator.serviceWorker.register("/sw.js").then(async (reg) => {
-                    reg.active.postMessage({
-                        type: "setKey",
-                        key: rsaKey,
-                    });
+        // Setup service worker with decrypted RSA key
+        const serviceWorkerSetup = () => {
+            // Set service worker (legacy RSA key for now)
+            navigator.serviceWorker.getRegistration("/").then((reg) => {
+                reg.active.postMessage({
+                    test: "test",
                 });
-                console.log("[INFO][LOGIN] Service Worker registered. Awaiting key setup...");
-                return;
-            }
-            throw new Error("Service Worker not supported");
-        } catch (e) {
-            console.error(e);
-            document.getElementById("login-error").innerText =
-                "Failed to securely set private key! Please try again or use a different browser";
-            clearInterval(interval);
-            document.getElementById("login-overlay").style.display = "none";
+            });
 
-            setCSRFToken(res.csrfToken);
-        }
+            try {
+                if ("serviceWorker" in navigator) {
+                    if (!rsaKey) {
+                        console.error(
+                            "[ERROR][LOGIN] Cannot proceed. Legacy private key is undefined."
+                        );
+                        document.getElementById("login-error").innerText =
+                            "Failed to decrypt private key! Please try again or use a different browser";
+                        clearInterval(interval);
+                        document.getElementById("login-overlay").style.display =
+                            "none";
+
+                        setCSRFToken(res.csrfToken);
+                        return;
+                    }
+
+                    // Listen for response
+                    const messageHandler = (event) => {
+                        if (event.data.type === "success") {
+                            console.log(
+                                "[INFO][LOGIN] Key setup successful in Service Worker."
+                            );
+                            navigator.serviceWorker.controller.removeEventListener(
+                                "message",
+                                messageHandler
+                            );
+                            clearInterval(interval);
+                            console.log(
+                                "[INFO][LOGIN] Process complete. Redirecting..."
+                            );
+
+                            localStorage.setItem("isAuthenticated", true);
+                            // window.location.href = `/${
+                            //     searchParams.get("redirect")
+                            //         ? searchParams.get("redirect")
+                            //         : "home"
+                            // }`;
+                        } else {
+                            console.log(
+                                "[ERROR][LOGIN] Key setup failed in Service Worker"
+                            );
+                        }
+                    };
+
+                    navigator.serviceWorker.addEventListener(
+                        "message",
+                        messageHandler
+                    );
+
+                    navigator.serviceWorker
+                        .register("/sw.js")
+                        .then(async (reg) => {
+                            reg.active.postMessage({
+                                type: "setKey",
+                                key: rsaKey,
+                            });
+                        });
+                    console.log(
+                        "[INFO][LOGIN] Service Worker registered. Awaiting key setup..."
+                    );
+                    return;
+                } else {
+                    throw new Error("Service Worker not supported");
+                }
+            } catch (e) {
+                console.error(e);
+                document.getElementById("login-error").innerText =
+                    "Failed to securely set private key! Please try again or use a different browser";
+                clearInterval(interval);
+                document.getElementById("login-overlay").style.display = "none";
+
+                setCSRFToken(res.csrfToken);
+            }
+        };
     };
 
     return (
