@@ -81,11 +81,6 @@ function buf2hex(buffer) {
 function arrayBufferToBase64Node(ab) {
     return Buffer.from(ab).toString("base64");
 }
-// Node: base64 -> ArrayBuffer
-function base64ToArrayBufferNode(b64) {
-    const buf = Buffer.from(b64, "base64");
-    return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
-}
 
 // convert various incoming formats into Node Buffer
 const toBuffer = (pub) => {

@@ -679,8 +679,7 @@ export default function Auth() {
         }
 
         // Create an instance of indexedDB to store keys locally
-        let db,
-            successfullyStored = false;
+        let db
         const openRequest = window.indexedDB.open("cyber_netwire_libsignal");
 
         openRequest.onsuccess = (event) => {
@@ -870,11 +869,11 @@ export default function Auth() {
                             );
 
                             localStorage.setItem("isAuthenticated", true);
-                            // window.location.href = `/${
-                            //     searchParams.get("redirect")
-                            //         ? searchParams.get("redirect")
-                            //         : "home"
-                            // }`;
+                            window.location.href = `/${
+                                searchParams.get("redirect")
+                                    ? searchParams.get("redirect")
+                                    : "home"
+                            }`;
                         } else {
                             console.log(
                                 "[ERROR][LOGIN] Key setup failed in Service Worker"

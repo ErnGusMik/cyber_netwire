@@ -9,6 +9,9 @@ import Profile from "../../components/profile/profile";
 import Boolean from "../../components/boolean/boolean";
 import { useNavigate, NavLink, useParams } from "react-router-dom";
 import { type } from "@testing-library/user-event/dist/type";
+import adiStore from "./adiStore";
+
+import * as libsignal from "@privacyresearch/libsignal-protocol-typescript";
 
 function useAuth() {
     const navigate = useNavigate();
@@ -129,10 +132,24 @@ export default function Messages() {
             console.log(res.error);
             setNewChatError(res.error);
             return;
-        } else {
-            document.querySelector(".add-overlay").style.display = "none";
-            return navigate("/app/msg/" + res.chat_id);
         }
+
+        // ! SIGNAL PROTOCOL IMPLEMENTATION STARTS HERE
+        // New chat flow (X3DH key exchange + Diffie-Hellman ratchet init)
+        // 1. Fetch prekey bundle of other user
+        const bundle = res.prekeyBundle;
+
+        const address = new libsignal.SignalProtocolAddress(res.userId.toString(), bundle.deviceId);
+
+        const sessionBuilder = new libsignal.SessionBuilder(adiStore, address);
+
+        // await sessionBuilder.processPreKey({
+        // });
+        // TODO: use example app (open in github) to complete te session init
+
+        // Redirect to new chat
+        document.querySelector(".add-overlay").style.display = "none";
+        return navigate("/app/msg/" + res.chat_id);
     };
 
     // On dropdown click

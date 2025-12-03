@@ -7,7 +7,12 @@ import {
     sendKey,
     checkIfUserExists,
     checkIfUsersAreFriends,
+    fetchPrekeyBundle,
 } from "../helpers/app.helpers.js";
+
+import {
+    checkIfUserExists as checkIfUserExistsByEmail
+} from "../helpers/auth.helpers.js";
 
 const changeStatus = async (req, res, next) => {
     // Check if user is logged in
@@ -132,6 +137,8 @@ const newChat = async (req, res, next) => {
         pssw = await bcrypt.hash(req.body.password, salt);
     }
 
+    const creatorUser = await checkIfUserExistsByEmail(req.session.email);
+
     // Create chat
     const chat = await query(
         "INSERT INTO chats (chat_type, chat_name, disappearing, password, reports, description, discoverable) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
@@ -139,7 +146,18 @@ const newChat = async (req, res, next) => {
             req.body.chat_type !== undefined || req.body.chat_type !== null
                 ? req.body.chat_type
                 : 1,
-            req.body.chat_name ? req.body.chat_name : "New Chat",
+            req.body.chat_name
+                ? req.body.chat_name
+                : req.body.members.length == 1
+                ? "DM-" +
+                  req.body.members[0].display_name +
+                  "_" +
+                  req.body.members[0].user_no +
+                  "-" +
+                  creatorUser.display_name +
+                  "_" +
+                  creatorUser.user_no
+                : "New Chat",
             req.body.disappearing ? req.body.disappearing : 0,
             pssw,
             0,
@@ -174,9 +192,25 @@ const newChat = async (req, res, next) => {
     // Send key to creator
     await sendKey(key, req.session.userID, chat.rows[0].id, 1);
 
+    // ! SIGNAL PROTOCOL IMPLEMENTATION STARTS HERE
+    // DMs initial key exchange
+    // Fetch Prekey bundle
+    const prekeyBundle = await fetchPrekeyBundle(req.session.userID);
+    if (prekeyBundle === null) {
+        res.status(500).send({
+            error: "Failed to fetch Prekey Bundle for Signal Protocol",
+        });
+        return;
+    }
+    console.log("Prekey Bundle fetched for user ID:", req.session.userID);
+    console.log(prekeyBundle);
+    // ! SIGNAL PROTOCOL IMPLEMENTATION ENDS HERE
+
     res.status(201).send({
         chat_id: chat.rows[0].id,
+        userId: req.session.userID,
         csrfToken: csrf,
+        prekeyBundle: prekeyBundle,
     });
 };
 
