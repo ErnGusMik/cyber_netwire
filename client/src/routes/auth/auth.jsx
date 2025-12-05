@@ -9,6 +9,7 @@ import Input from "../../components/input/input";
 import Nav from "../../components/nav/nav";
 import { redirect, useSearchParams } from "react-router-dom";
 import { type } from "@testing-library/user-event/dist/type";
+import adiStore from "../../adiStore";
 
 import { Argon2, Argon2Mode } from "@sphereon/isomorphic-argon2";
 
@@ -478,53 +479,6 @@ export default function Auth() {
             return;
         }
 
-        // ! SIGNAL PROTOCOL IMPLEMENTATION CONTINUES HERE
-        // Signup flow
-        // Upload One-time Prekeys to server
-        let opkCsrftoken;
-        if (signup) {
-            console.log(
-                "[INFO][SIGNUP] Uploading one-time prekeys to server... (will take a while, don't refresh!)"
-            );
-            const opkReq = await fetch(
-                "http://localhost:8080/auth/upload-prekeys",
-                {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "X-CSRF-Token": res.csrfToken,
-                    },
-                    body: JSON.stringify({
-                        prekeys: opk.map((pk) => ({
-                            keyId: pk.keyId,
-                            publicKey: arrayBufferToBase64(pk.keyPair.pubKey),
-                        })),
-                    }), // send one-time prekeys if signing up
-                    credentials: "include",
-                }
-            );
-
-            const opkRes = await opkReq.json();
-            if (opkReq.status !== 200) {
-                console.error(
-                    "[ERROR][SIGNUP] Failed to upload one-time prekeys! Status: " +
-                        opkReq.statusText
-                );
-                document.getElementById("login-error").innerText =
-                    "Failed to upload one-time prekeys! Please refresh and try again. (" +
-                    opkRes.error +
-                    ")";
-                clearInterval(interval);
-                document.getElementById("login-overlay").style.display = "none";
-                setCSRFToken(opkRes.csrfToken);
-                return;
-            }
-
-            setCSRFToken(opkRes.csrfToken);
-            opkCsrftoken = opkRes.csrfToken;
-        }
-        // ! SIGNAL PROTOCOL IMPLEMENTATION STOPS HERE
-
         console.log("[INFO][LOGIN] Decrypting legacy private key...");
         let rsaKey;
         const [key, hkdfKey] = await createKey(password, res.salt);
@@ -566,7 +520,7 @@ export default function Auth() {
         // Signup & login flow
         // HKDF-Expand to create separate keys for encryption and verification
         console.log(
-            "[INFO][SIGNUP] Prepping Signal Protocol private keys for storage..."
+            "[INFO][SIGNUP] Prepping Signal Protocol keys for storage..."
         );
         const verifierKey = await window.crypto.subtle.deriveKey(
             {
@@ -593,6 +547,70 @@ export default function Auth() {
             false,
             ["encrypt", "decrypt"]
         );
+
+        // Signup flow
+        // Upload One-time Prekeys to server
+        let opkCsrftoken;
+        if (signup) {
+            console.log(
+                "[INFO][SIGNUP] Uploading one-time prekeys to server... (will take a while, don't refresh!)"
+            );
+
+            const prekeysSend = opk.map((pk) => ({
+                keyId: pk.keyId,
+                publicKey: arrayBufferToBase64(pk.keyPair.pubKey),
+                privKey: null,
+                iv: null,
+            }));
+
+            for (let i = 0; i < prekeysSend.length; i++) {
+                const iv = crypto.getRandomValues(new Uint8Array(12));
+                prekeysSend[i].privKey = await crypto.subtle.encrypt(
+                    { name: "AES-GCM", iv: iv },
+                    encKey,
+                    ensureArrayBuffer(opk[i].keyPair.privKey)
+                );
+
+                prekeysSend[i].iv = arrayBufferToBase64(iv.buffer);
+                prekeysSend[i].privKey = arrayBufferToBase64(
+                    prekeysSend[i].privKey
+                );
+            }
+
+            const opkReq = await fetch(
+                "http://localhost:8080/auth/upload-prekeys",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-CSRF-Token": res.csrfToken,
+                    },
+                    body: JSON.stringify({
+                        prekeys: prekeysSend,
+                    }), // send one-time prekeys if signing up
+                    credentials: "include",
+                }
+            );
+
+            const opkRes = await opkReq.json();
+            if (opkReq.status !== 200) {
+                console.error(
+                    "[ERROR][SIGNUP] Failed to upload one-time prekeys! Status: " +
+                        opkReq.statusText
+                );
+                document.getElementById("login-error").innerText =
+                    "Failed to upload one-time prekeys! Please refresh and try again. (" +
+                    opkRes.error +
+                    ")";
+                clearInterval(interval);
+                document.getElementById("login-overlay").style.display = "none";
+                setCSRFToken(opkRes.csrfToken);
+                return;
+            }
+
+            setCSRFToken(opkRes.csrfToken);
+            opkCsrftoken = opkRes.csrfToken;
+        }
 
         // Variables for signal keys storage
         let id_key, spk_key;
@@ -678,153 +696,193 @@ export default function Auth() {
             spk_key = decryptedSignedPreKey;
         }
 
+        // Store keys in adiStore (for libsignal)
+        adiStore.putIdentityKeyPair({
+            privKey: ensureArrayBuffer(
+                signup ? privateKeys.identityKey : id_key
+            ),
+            pubKey: ensureArrayBuffer(res.prekeyBundle.identityKey),
+        });
+
+        adiStore.putLocalRegistrationId(res.prekeyBundle.registrationId);
+
+        adiStore.storeSignedPreKey(res.prekeyBundle.signedPreKey.keyId, {
+            privKey: ensureArrayBuffer(
+                signup ? privateKeys.signedPreKey : spk_key
+            ),
+            pubKey: ensureArrayBuffer(res.prekeyBundle.signedPreKey.publicKey),
+            signature: ensureArrayBuffer(
+                res.prekeyBundle.signedPreKey.signature
+            ),
+            keyId: res.prekeyBundle.signedPreKey.keyId,
+        });
+
+        for (let i = 0; i < res.oneTimePreKeys.length; i++) {
+            const opk = res.oneTimePreKeys[i];
+
+            const privOpk = await crypto.subtle.decrypt(
+                {
+                    name: "AES-GCM",
+                    iv: ensureArrayBuffer(opk.iv),
+                },
+                encKey,
+                ensureArrayBuffer(opk.privKey)
+            );
+
+            adiStore.storePreKey(opk.keyId, {
+                privKey: ensureArrayBuffer(privOpk),
+                pubKey: ensureArrayBuffer(opk.publicKey),
+                keyId: opk.keyId,
+            });
+        }
+
         // Create an instance of indexedDB to store keys locally
-        let db
-        const openRequest = window.indexedDB.open("cyber_netwire_libsignal");
+        // let db;
+        // const openRequest = window.indexedDB.open("cyber_netwire_libsignal");
 
-        openRequest.onsuccess = (event) => {
-            db = event.target.result;
+        // openRequest.onsuccess = (event) => {
+        //     db = event.target.result;
 
-            // Ensure required object stores exist. If not, close and reopen with a version bump
-            const needsUpgrade =
-                !db.objectStoreNames.contains("identityKey") ||
-                !db.objectStoreNames.contains("signedPreKey");
+        // // Ensure required object stores exist. If not, close and reopen with a version bump
+        // const needsUpgrade =
+        //     !db.objectStoreNames.contains("identityKey") ||
+        //     !db.objectStoreNames.contains("signedPreKey");
 
-            // Function to store keys
-            const storeKeys = (database) => {
-                try {
-                    const tx = database.transaction(
-                        ["identityKey", "signedPreKey"],
-                        "readwrite"
-                    );
-                    const idStore = tx.objectStore("identityKey");
-                    const spkStore = tx.objectStore("signedPreKey");
+        // Function to store keys
+        // const storeKeys = (database) => {
+        //     try {
+        //         const tx = database.transaction(
+        //             ["identityKey", "signedPreKey"],
+        //             "readwrite"
+        //         );
+        //         const idStore = tx.objectStore("identityKey");
+        //         const spkStore = tx.objectStore("signedPreKey");
 
-                    idStore.put({
-                        id: "identityKey",
-                        key: ensureArrayBuffer(
-                            signup ? privateKeys.identityKey : id_key
-                        ),
-                    });
+        //         idStore.put({
+        //             id: "identityKey",
+        //             key: ensureArrayBuffer(
+        //                 signup ? privateKeys.identityKey : id_key
+        //             ),
+        //         });
 
-                    spkStore.put({
-                        id: "signedPreKey",
-                        key: ensureArrayBuffer(
-                            signup ? privateKeys.signedPreKey : spk_key
-                        ),
-                    });
+        //         spkStore.put({
+        //             id: "signedPreKey",
+        //             key: ensureArrayBuffer(
+        //                 signup ? privateKeys.signedPreKey : spk_key
+        //             ),
+        //         });
 
-                    tx.oncomplete = () => {
-                        console.log(
-                            "[INFO][LOGIN] Signal Protocol private keys stored successfully."
-                        );
-                        // Proceed to service worker setup
-                        serviceWorkerSetup();
-                    };
+        //         tx.oncomplete = () => {
+        //             console.log(
+        //                 "[INFO][LOGIN] Signal Protocol private keys stored successfully."
+        //             );
+        //             // Proceed to service worker setup
+        //             serviceWorkerSetup();
+        //         };
 
-                    tx.onerror = (err) => {
-                        console.error(
-                            "[ERROR][LOGIN] Failed to store Signal Protocol keys:",
-                            err
-                        );
-                    };
-                } catch (err) {
-                    console.error(
-                        "[ERROR][LOGIN] IndexedDB transaction error while storing keys:",
-                        err
-                    );
-                }
-            };
+        //         tx.onerror = (err) => {
+        //             console.error(
+        //                 "[ERROR][LOGIN] Failed to store Signal Protocol keys:",
+        //                 err
+        //             );
+        //         };
+        //     } catch (err) {
+        //         console.error(
+        //             "[ERROR][LOGIN] IndexedDB transaction error while storing keys:",
+        //             err
+        //         );
+        //     }
+        // };
 
-            // If upgrade needed, do it
-            if (needsUpgrade) {
-                // Close current connection and open with a bumped version to create missing stores
-                const nextVersion = db.version + 1;
-                db.close();
-                const upgradeReq = window.indexedDB.open(
-                    "cyber_netwire_libsignal",
-                    nextVersion
-                );
+        //     // If upgrade needed, do it
+        //     if (needsUpgrade) {
+        //         // Close current connection and open with a bumped version to create missing stores
+        //         const nextVersion = db.version + 1;
+        //         db.close();
+        //         const upgradeReq = window.indexedDB.open(
+        //             "cyber_netwire_libsignal",
+        //             nextVersion
+        //         );
 
-                upgradeReq.onupgradeneeded = (ev) => {
-                    const upgradeDb = ev.target.result;
-                    if (!upgradeDb.objectStoreNames.contains("identityKey")) {
-                        upgradeDb.createObjectStore("identityKey", {
-                            keyPath: "id",
-                        });
-                    }
-                    if (!upgradeDb.objectStoreNames.contains("signedPreKey")) {
-                        upgradeDb.createObjectStore("signedPreKey", {
-                            keyPath: "id",
-                        });
-                    }
-                };
+        //         upgradeReq.onupgradeneeded = (ev) => {
+        //             const upgradeDb = ev.target.result;
+        //             if (!upgradeDb.objectStoreNames.contains("identityKey")) {
+        //                 upgradeDb.createObjectStore("identityKey", {
+        //                     keyPath: "id",
+        //                 });
+        //             }
+        //             if (!upgradeDb.objectStoreNames.contains("signedPreKey")) {
+        //                 upgradeDb.createObjectStore("signedPreKey", {
+        //                     keyPath: "id",
+        //                 });
+        //             }
+        //         };
 
-                upgradeReq.onsuccess = (ev) => {
-                    db = ev.target.result;
-                    storeKeys(db);
-                };
+        //         upgradeReq.onsuccess = (ev) => {
+        //             db = ev.target.result;
+        //             storeKeys(db);
+        //         };
 
-                upgradeReq.onerror = (ev) => {
-                    console.error(
-                        "[ERROR][LOGIN] Failed to upgrade IndexedDB to create object stores:",
-                        ev.target.error
-                    );
-                };
-            } else {
-                storeKeys(db);
-            }
-        };
+        //         upgradeReq.onerror = (ev) => {
+        //             console.error(
+        //                 "[ERROR][LOGIN] Failed to upgrade IndexedDB to create object stores:",
+        //                 ev.target.error
+        //             );
+        //         };
+        //     } else {
+        //         storeKeys(db);
+        //     }
+        // };
 
-        openRequest.onerror = (event) => {
-            console.error(
-                "[ERROR][LOGIN] Failed to create IndexedDB instance for libsignal:",
-                event.target.errorCode
-            );
-            alert(
-                "We understand you are worried about your privacy, but we require indexedDB to securely store your encryption keys locally. Please enable it in your browser settings and try again."
-            );
-            return;
-        };
+        // openRequest.onerror = (event) => {
+        //     console.error(
+        //         "[ERROR][LOGIN] Failed to create IndexedDB instance for libsignal:",
+        //         event.target.errorCode
+        //     );
+        //     alert(
+        //         "We understand you are worried about your privacy, but we require indexedDB to securely store your encryption keys locally. Please enable it in your browser settings and try again."
+        //     );
+        //     return;
+        // };
 
-        openRequest.onupgradeneeded = (event) => {
-            db = event.target.result;
-            // Create object stores
-            const idStore = db.createObjectStore("identityKey", {
-                keyPath: "id",
-            });
+        // openRequest.onupgradeneeded = (event) => {
+        //     db = event.target.result;
+        //     // Create object stores
+        //     const idStore = db.createObjectStore("identityKey", {
+        //         keyPath: "id",
+        //     });
 
-            const spkStore = db.createObjectStore("signedPreKey", {
-                keyPath: "id",
-            });
+        //     const spkStore = db.createObjectStore("signedPreKey", {
+        //         keyPath: "id",
+        //     });
 
-            console.log(
-                "[INFO][LOGIN] IndexedDB object stores for libsignal created/verified successfully."
-            );
+        //     console.log(
+        //         "[INFO][LOGIN] IndexedDB object stores for libsignal created/verified successfully."
+        //     );
 
-            // Error handling
-            idStore.onerror = (event) => {
-                console.error(
-                    "[ERROR][LOGIN] Failed to create identityKey object store:",
-                    event.target.errorCode
-                );
-                alert(
-                    "We understand you are worried about your privacy, but we require indexedDB to securely store your encryption keys locally. Please enable it in your browser settings and try again."
-                );
-                return;
-            };
+        //     // Error handling
+        //     idStore.onerror = (event) => {
+        //         console.error(
+        //             "[ERROR][LOGIN] Failed to create identityKey object store:",
+        //             event.target.errorCode
+        //         );
+        //         alert(
+        //             "We understand you are worried about your privacy, but we require indexedDB to securely store your encryption keys locally. Please enable it in your browser settings and try again."
+        //         );
+        //         return;
+        //     };
 
-            spkStore.onerror = (event) => {
-                console.error(
-                    "[ERROR][LOGIN] Failed to create signedPreKey object store:",
-                    event.target.errorCode
-                );
-                alert(
-                    "We understand you are worried about your privacy, but we require indexedDB to securely store your encryption keys locally. Please enable it in your browser settings and try again."
-                );
-                return;
-            };
-        };
+        //     spkStore.onerror = (event) => {
+        //         console.error(
+        //             "[ERROR][LOGIN] Failed to create signedPreKey object store:",
+        //             event.target.errorCode
+        //         );
+        //         alert(
+        //             "We understand you are worried about your privacy, but we require indexedDB to securely store your encryption keys locally. Please enable it in your browser settings and try again."
+        //         );
+        //         return;
+        //     };
+        // };
 
         // ! SIGNAL IMPLEMENTATION STOPS HERE
 
@@ -911,6 +969,7 @@ export default function Auth() {
                 setCSRFToken(res.csrfToken);
             }
         };
+        serviceWorkerSetup();
     };
 
     return (

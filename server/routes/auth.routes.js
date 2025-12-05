@@ -4,6 +4,7 @@ import {
     checkIfUserExists,
     createCSRFToken,
     createUser,
+    fetchAllOPKs,
     loadPrivateKeys,
     uploadOneTimePrekeys,
     uploadPrivateKeys,
@@ -12,6 +13,7 @@ import {
     validatePassword,
 } from "../helpers/auth.helpers.js";
 import bcrypt from "bcrypt";
+import { fetchPrekeyBundle } from "../helpers/app.helpers.js";
 
 // Create a new CSRF token
 const generateCSRFToken = (req, res) => {
@@ -172,6 +174,14 @@ const verifyPassword = async (req, res) => {
         signalKeys = privKeys;
     }
 
+    const prekeyBundle = await fetchPrekeyBundle(
+        user ? user.id : id,
+    );
+
+    const opks = await fetchAllOPKs(
+        user ? user.id : id,
+    );
+
     req.session.loggedIn = true;
     req.session.userID = user ? user.id : id;
     req.session.save();
@@ -187,6 +197,8 @@ const verifyPassword = async (req, res) => {
         signedPreKey: signalKeys.signed_prekey || null,
         idkIV: signalKeys.idk_iv || null,
         spkIV: signalKeys.spk_iv || null,
+        prekeyBundle: prekeyBundle,
+        oneTimePreKeys: opks,
     });
 };
 

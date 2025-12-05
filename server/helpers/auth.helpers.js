@@ -283,12 +283,12 @@ const uploadOneTimePrekeys = async (userId, preKeys) => {
         await client.query("BEGIN");
 
         const insertText =
-            "INSERT INTO opk_keys (user_id, key_id, public_key) VALUES ($1, $2, $3)";
+            "INSERT INTO opk_keys (user_id, key_id, public_key, priv_key, key_iv) VALUES ($1, $2, $3, $4, $5)";
         let inserted = 0;
 
         for (const pk of preKeys) {
-            const buf = toBuffer(pk.publicKey);
-            await client.query(insertText, [userId, pk.keyId, buf]);
+            const bufPub = toBuffer(pk.publicKey);
+            await client.query(insertText, [userId, pk.keyId, bufPub, toBuffer(pk.privKey), toBuffer(pk.iv)]);
             inserted++;
         }
 
@@ -341,6 +341,19 @@ const loadPrivateKeys = async (userId) => {
     return keys;
 }
 
+const fetchAllOPKs = async (userId) => {
+    const res = await query(
+        "SELECT key_id, public_key, priv_key, key_iv FROM opk_keys WHERE user_id = $1 AND is_used = false",
+        [userId]
+    );
+    return res.rows.map(row => ({
+        keyId: row.key_id,
+        publicKey: arrayBufferToBase64Node(row.public_key),
+        privKey: arrayBufferToBase64Node(row.priv_key),
+        iv: arrayBufferToBase64Node(row.key_iv),
+    }));
+}
+
 export {
     checkIfUserExists,
     createUser,
@@ -351,5 +364,6 @@ export {
     uploadOneTimePrekeys,
     uploadPrivateKeys,
     addLibsignalVerifier,
-    loadPrivateKeys
+    loadPrivateKeys,
+    fetchAllOPKs,
 };

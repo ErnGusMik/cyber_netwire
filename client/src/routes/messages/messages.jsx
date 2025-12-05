@@ -9,7 +9,7 @@ import Profile from "../../components/profile/profile";
 import Boolean from "../../components/boolean/boolean";
 import { useNavigate, NavLink, useParams } from "react-router-dom";
 import { type } from "@testing-library/user-event/dist/type";
-import adiStore from "./adiStore";
+import adiStore from "../../adiStore";
 
 import * as libsignal from "@privacyresearch/libsignal-protocol-typescript";
 
@@ -48,6 +48,29 @@ export default function Messages() {
         return new Uint8Array(
             hexString.match(/../g).map((h) => parseInt(h, 16))
         ).buffer;
+    }
+
+    // Browser: base64 -> ArrayBuffer
+    function base64ToArrayBuffer(base64) {
+        const binary = atob(base64);
+        const len = binary.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes.buffer;
+    }
+
+    // Accept either a base64 string or a BufferSource and return an ArrayBuffer
+    function ensureArrayBuffer(input) {
+        if (!input) return input;
+        if (typeof input === "string") return base64ToArrayBuffer(input);
+        if (input instanceof ArrayBuffer) return input;
+        if (ArrayBuffer.isView(input)) return input.buffer;
+        // object with { data: [...] }
+        if (input && typeof input === "object" && Array.isArray(input.data))
+            return new Uint8Array(input.data).buffer;
+        return input;
     }
 
     // Handle new chat creation
@@ -137,14 +160,38 @@ export default function Messages() {
         // ! SIGNAL PROTOCOL IMPLEMENTATION STARTS HERE
         // New chat flow (X3DH key exchange + Diffie-Hellman ratchet init)
         // 1. Fetch prekey bundle of other user
-        const bundle = res.prekeyBundle;
+        console.log("ADI Store: ", adiStore);
 
-        const address = new libsignal.SignalProtocolAddress(res.userId.toString(), bundle.deviceId);
+        const bundle = {
+            identityKey: ensureArrayBuffer(res.prekeyBundle.identityKey),
+            signedPreKey: {
+                keyId: res.prekeyBundle.signedPreKey.keyId,
+                publicKey: ensureArrayBuffer(
+                    res.prekeyBundle.signedPreKey.publicKey
+                ),
+                signature: ensureArrayBuffer(
+                    res.prekeyBundle.signedPreKey.signature
+                ),
+            },
+            preKey: {
+                keyId: res.prekeyBundle.preKey.keyId,
+                publicKey: ensureArrayBuffer(res.prekeyBundle.preKey.publicKey),
+            },
+            registrationId: res.prekeyBundle.registrationId,
+        };
+        console.log("Bundle: ", bundle);
+
+        const address = new libsignal.SignalProtocolAddress(
+            res.userId.toString(),
+            res.prekeyBundle.deviceId
+        );
+        console.log("Address: ", address);
 
         const sessionBuilder = new libsignal.SessionBuilder(adiStore, address);
 
-        // await sessionBuilder.processPreKey({
-        // });
+        const session = await sessionBuilder.processPreKey(bundle);
+        console.log("Session: ", session);
+
         // TODO: use example app (open in github) to complete te session init
 
         // Redirect to new chat
