@@ -195,7 +195,7 @@ const newChat = async (req, res, next) => {
     // ! SIGNAL PROTOCOL IMPLEMENTATION STARTS HERE
     // DMs initial key exchange
     // Fetch Prekey bundle
-    const prekeyBundle = await fetchPrekeyBundle(req.session.userID);
+    const prekeyBundle = await fetchPrekeyBundle(req.session.userID, req.body.device_id);
     if (prekeyBundle === null) {
         res.status(500).send({
             error: "Failed to fetch Prekey Bundle for Signal Protocol",

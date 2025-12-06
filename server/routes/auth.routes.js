@@ -5,15 +5,15 @@ import {
     createCSRFToken,
     createUser,
     fetchAllOPKs,
+    fetchRegistrationBundle,
     loadPrivateKeys,
+    registerDevice,
     uploadOneTimePrekeys,
     uploadPrivateKeys,
     uploadUserKeys,
     validateCSRFToken,
     validatePassword,
 } from "../helpers/auth.helpers.js";
-import bcrypt from "bcrypt";
-import { fetchPrekeyBundle } from "../helpers/app.helpers.js";
 
 // Create a new CSRF token
 const generateCSRFToken = (req, res) => {
@@ -117,8 +117,7 @@ const verifyPassword = async (req, res) => {
         if (
             !req.body.keyBundle ||
             !req.body.keyBundle.registrationId ||
-            !req.body.keyBundle.identityKey ||
-            !req.body.keyBundle.signedPreKey
+            !req.body.keyBundle.identityKey
         ) {
             res.status(400).send({
                 error: "Missing key bundle for new user",
@@ -174,7 +173,7 @@ const verifyPassword = async (req, res) => {
         signalKeys = privKeys;
     }
 
-    const prekeyBundle = await fetchPrekeyBundle(
+    const prekeyBundle = await fetchRegistrationBundle(
         user ? user.id : id,
     );
 
@@ -194,9 +193,7 @@ const verifyPassword = async (req, res) => {
         psswIV: user ? user.password_iv : pssw_iv,
         salt: user ? user.salt : salt,
         identityKey: signalKeys.identity_key || null,
-        signedPreKey: signalKeys.signed_prekey || null,
         idkIV: signalKeys.idk_iv || null,
-        spkIV: signalKeys.spk_iv || null,
         prekeyBundle: prekeyBundle,
         oneTimePreKeys: opks,
     });
@@ -251,15 +248,92 @@ const uploadPreKeys = async (req, res) => {
     });
 };
 
+const registerNewDevice = async (req, res) => {
+    const csrfToken = validateCSRFToken(req, res);
+    if (!csrfToken) return;
+
+    if (
+        !req.body.prekeys ||
+        !Array.isArray(req.body.prekeys) ||
+        req.body.prekeys.length === 0
+    ) {
+        res.status(400).send({
+            error: "Invalid prekeys format.",
+            csrfToken: csrfToken,
+        });
+        return;
+    }
+
+    if (!req.body.spkId ||
+        !req.body.spkPubKey ||
+        !req.body.spkSignature ||
+        !req.body.identityKey) {
+        res.status(400).send({
+            error: "Missing signed prekey or identity key for device registration.",
+            csrfToken: csrfToken,
+        });
+        return;
+    }
+
+    if (!req.session.email || req.session.loggedIn !== true) {
+        res.status(401).send({
+            error: "Invalid session. Have you logged in?",
+            csrfToken: csrfToken,
+        });
+        return;
+    }
+
+    const user = await checkIfUserExists(req.session.email);
+    if (!user) {
+        res.status(401).send({
+            error: "User does not exist.",
+            csrfToken: csrfToken,
+        });
+        return;
+    }
+
+    const deviceId = await registerDevice(
+        user.id,
+        req.body.spkId,
+        req.body.spkPubKey,
+        req.body.spkSignature,
+        req.body.identityKey
+    );
+
+    if (!deviceId) {
+        res.status(500).send({
+            error: "Failed to register new device. Try again.",
+            csrfToken: csrfToken,
+        });
+        return;
+    }
+
+    const uploaded = await uploadOneTimePrekeys(user.id, req.body.prekeys, deviceId);
+    if (!uploaded) {
+        res.status(500).send({
+            error: "Failed to upload one-time prekeys. Try again.",
+            csrfToken: csrfToken,
+        });
+        return;
+    }
+
+    req.session.deviceId = deviceId;
+    req.session.save();
+
+    res.status(200).send({
+        csrfToken: csrfToken,
+        deviceId: deviceId,
+        uploadedCount: uploaded,
+    });
+}
+
 const uploadPrivKeys = async (req, res) => {
     const csrfToken = validateCSRFToken(req, res);
     if (!csrfToken) return;
 
     if (
         !req.body.identityKey ||
-        !req.body.signedPreKey ||
         !req.body.idkIV ||
-        !req.body.spkIV ||
         !req.body.verifierKey
     ) {
         res.status(400).send({
@@ -289,9 +363,7 @@ const uploadPrivKeys = async (req, res) => {
     const uploaded = await uploadPrivateKeys(
         user.id,
         req.body.identityKey,
-        req.body.signedPreKey,
         req.body.idkIV,
-        req.body.spkIV
     );
     if (!uploaded) {
         res.status(500).send({
@@ -323,4 +395,5 @@ export {
     verifyPassword,
     uploadPreKeys,
     uploadPrivKeys,
+    registerNewDevice,
 };

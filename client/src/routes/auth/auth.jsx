@@ -232,10 +232,11 @@ export default function Auth() {
         const password = document.getElementById("login-passw").value;
 
         // ! SIGNAL PROTOCOL IMPLEMENTATION VARIABLES
-        let prekeyBundle;
+        let registrationBundle;
         let privateKeys = {}; // To store private keys for later upload
         const opk = []; // One-time PreKeys
-        let signalVerifier;
+        let signalVerifier; // Password verifier key
+        let prevCsrfToken = csrfToken;
 
         // If new user, set criteria
         if (signup) {
@@ -268,145 +269,23 @@ export default function Auth() {
 
             // ! SIGNAL PROTOCOL IMPLEMENTATION STARTS HERE
             // Signup flow
-            console.log("[INFO][SIGNUP] Generating Signal Protocol keys");
+            console.log(
+                "[INFO][SIGNUP] Generating Signal protocol long-term identity key"
+            );
             // Generate registration ID
             const registrationId = libsignal.KeyHelper.generateRegistrationId();
-
             // Generate identity key pair
             const identityKey =
                 await libsignal.KeyHelper.generateIdentityKeyPair();
-            privateKeys.identityKey = identityKey.privKey;
+            privateKeys.identityKey = identityKey;
 
-            // Generating signed prekey
-            const signedPrekeyId = Math.floor(Math.random() * 1e9); // stable unique id for this prekey
             const timestamp = Date.now();
 
-            // Generate a fresh keypair for the signed prekey (libsignal official)
-            // const signedPriv = libsignal.PrivateKey.generate();
-            // const signedPub = signedPriv.getPublicKey();
-            // Creating signature
-            // const signedPubBytes = signedPub.getPublicKeyBytes(); // Uint8Array -- needed for signing
-            // const signature = identityKey.privateKey.sign(signedPubBytes); // Uint8Array
-
-            // Create SignedPreKeyRecord, to be sent to server (libsignal official)
-            // const signedPreKeyRecord = libsignal.SignedPreKeyRecord.new(
-            //     signedPrekeyId,
-            //     timestamp,
-            //     signedPub,
-            //     signedPriv,
-            //     signature
-            // );
-
-            const signedPreKey = await libsignal.KeyHelper.generateSignedPreKey(
-                identityKey,
-                signedPrekeyId
-            );
-            privateKeys.signedPreKey = signedPreKey.keyPair.privKey;
-
-            // Signature verification (libsignal official)
-            // const ok = identityKey.publicKey.verify(
-            //     signedPubBytes,
-            //     signature
-            // );
-
-            // Signed pre-key signature verification
-            const lib = await libsignal.default(); // Returns a Curve instance object
-            // basic sanity checks (helpful debugging)
-
-            // Use the async verifier and treat "no throw" as valid
-            let verified = false;
-            try {
-                // This will throw on an invalid signature (per the library implementation)
-                await lib.Curve.async.verifySignature(
-                    identityKey.pubKey,
-                    signedPreKey.keyPair.pubKey,
-                    signedPreKey.signature
-                );
-                // If we reached here, verification succeeded
-                verified = true;
-            } catch (err) {
-                console.error(
-                    "[ERROR][SIGNUP] Signature verification failed:",
-                    err
-                );
-                verified = false;
-            }
-
-            console.log(
-                "[INFO][SIGNUP] Signed PreKey signature valid:",
-                verified,
-                ". Generating One-time PreKeys. This may take a while..."
-            );
-            if (!verified) {
-                console.error(
-                    "[ERROR][SIGNUP] Signed PreKey signature verification failed. Keys need to be regenerated."
-                );
-                document.getElementById("login-error").innerText =
-                    "Failed to securely create your account! Signature verification failed.";
-                return;
-            }
-
-            // Generating one-time prekeys
-            const OPK_COUNT = 100;
-
-            for (let i = 0; i < OPK_COUNT; i++) {
-                // const id = i + 1;
-                // const priv = libsignal.PrivateKey.generate(); // Generate private key
-                // const pub = priv.getPublicKey(); // Derive public key
-                // const record = libsignal.PreKeyRecord.new(id, pub, priv); // Create PreKeyRecord from keys
-                // opk.push(record);
-                // // For upload of public key, call record.publicKey().serialize()
-
-                const prekey = await libsignal.KeyHelper.generatePreKey(i + 1);
-                opk.push(prekey);
-            }
-
-            // Create Post Quantum Kyber PreKey (libsignal official)
-            // const kyberKeyPair = libsignal.KEMKeyPair.generate();
-            // const kyberPubKey = kyberKeyPair.getPublicKey();
-            // const kyberPubBytes = kyberPubKey.serialize(); // Uint8Array
-
-            // Sign Kyber public key with identity private key (libsignal official)
-            // const kyberSignature = identityKey.privateKey.sign(kyberPubBytes); // Uint8Array
-
-            // Create KyberPreKeyRecord for storage / upload (libsignal official)
-            // const kyberPreKeyRecord = libsignal.KyberPreKeyRecord.new(
-            //     1, // kyberPreKeyId -- can be any number for now
-            //     Date.now(), // timestamp
-            //     kyberKeyPair, // Kyber keypair
-            //     kyberSignature // signature
-            // );
-
-            // Get prekey bundle ready (libsignal official)
-            // const prekeyBundle = libsignal.PreKeyBundle.new(
-            //     1, // registrationId -- can be any number for now
-            //     1, // deviceId -- can be any number for now
-            //     1, // preKeyId -- selecting first prekey for now
-            //     opk[0].publicKey(), // preKey public key
-            //     signedPrekeyId, // signed prekey id
-            //     signedPreKeyRecord.publicKey(), // signed prekey public key
-            //     signedPreKeyRecord.signature, // signed prekey signature
-            //     identityKey.publicKey, // identity public key
-            //     kyberPreKeyRecord.id, // Kyber prekey id
-            //     kyberPreKeyRecord.publicKey, // Kyber public key
-            //     kyberPreKeyRecord.signature // Kyber public key signature
-            // );
-
-            prekeyBundle = {
+            registrationBundle = {
                 registrationId: registrationId,
-                deviceId: 1,
-                signedPreKey: {
-                    keyId: signedPreKey.keyId,
-                    publicKey: arrayBufferToBase64(signedPreKey.keyPair.pubKey),
-                    signature: arrayBufferToBase64(signedPreKey.signature),
-                },
                 identityKey: arrayBufferToBase64(identityKey.pubKey),
                 timestamp: timestamp,
             };
-
-            console.log(
-                "[INFO][SIGNUP] Required Signal Protocol data generated. Verifying password & public key bundle..."
-            );
 
             // ! SIGNAL PROTOCOL IMPLEMENTATION STOPS HERE
         }
@@ -424,6 +303,7 @@ export default function Auth() {
 
         // ! SIGNAL PROTOCOL IMPLEMENTATION CONTINUES HERE
         // Login flow
+        console.log("[INFO][BOTH] Preparing password verifier key...");
         if (!signup) {
             const [_, hkdfKey] = await createKey(password, verifierData.salt);
             signalVerifier = await window.crypto.subtle.deriveKey(
@@ -441,12 +321,13 @@ export default function Auth() {
         }
         // ! SIGNAL PROTOCOL IMPLEMENTATION STOPS HERE
 
-        // Send password to server
+        console.log("[INFO][LOGIN] Sending login/signup request to server...");
+        // Send password to server & create user if needed
         const req = await fetch("http://localhost:8080/auth/verify", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
-                "X-CSRF-Token": csrfToken,
+                "X-CSRF-Token": prevCsrfToken,
             },
             body: JSON.stringify({
                 password: signup
@@ -457,14 +338,16 @@ export default function Auth() {
                               signalVerifier
                           )
                       ), // send derived verifier if logging in
-                keyBundle: signup ? prekeyBundle : null, // send prekey bundle if signing up
+                keyBundle: signup ? registrationBundle : null, // send registration bundle if signing up
             }),
             credentials: "include",
         });
 
         const res = await req.json();
         console.log(res);
+        privateKeys.identityKey.pubKey = base64ToArrayBuffer(res.prekeyBundle.identityKey);
         setCSRFToken(res.csrfToken);
+        prevCsrfToken = res.csrfToken;
 
         // Handle response
         if (req.status !== 200) {
@@ -479,7 +362,7 @@ export default function Auth() {
             return;
         }
 
-        console.log("[INFO][LOGIN] Decrypting legacy private key...");
+        console.log("[INFO][BOTH] Decrypting legacy private key...");
         let rsaKey;
         const [key, hkdfKey] = await createKey(password, res.salt);
 
@@ -504,10 +387,10 @@ export default function Auth() {
                 true, //! change
                 ["decrypt"]
             );
-            console.log("[INFO][LOGIN] Legacy private key ready.");
+            console.log("[INFO][BOTH] Legacy private key ready.");
         } catch (e) {
             console.error(
-                "[ERROR][LOGIN] Failed to decrypt legacy private key:",
+                "[ERROR][BOTH] Failed to decrypt legacy private key:",
                 e
             );
             document.getElementById("login-error").innerText =
@@ -516,11 +399,12 @@ export default function Auth() {
             clearInterval(interval);
             document.getElementById("login-overlay").style.display = "none";
         }
+
         // ! SIGNAL IMPLEMENTATION CONTINUES HERE
         // Signup & login flow
         // HKDF-Expand to create separate keys for encryption and verification
         console.log(
-            "[INFO][SIGNUP] Prepping Signal Protocol keys for storage..."
+            "[INFO][BOTH] Prepping password-derived verifier and encryption keys..."
         );
         const verifierKey = await window.crypto.subtle.deriveKey(
             {
@@ -548,107 +432,39 @@ export default function Auth() {
             ["encrypt", "decrypt"]
         );
 
-        // Signup flow
-        // Upload One-time Prekeys to server
-        let opkCsrftoken;
-        if (signup) {
-            console.log(
-                "[INFO][SIGNUP] Uploading one-time prekeys to server... (will take a while, don't refresh!)"
-            );
-
-            const prekeysSend = opk.map((pk) => ({
-                keyId: pk.keyId,
-                publicKey: arrayBufferToBase64(pk.keyPair.pubKey),
-                privKey: null,
-                iv: null,
-            }));
-
-            for (let i = 0; i < prekeysSend.length; i++) {
-                const iv = crypto.getRandomValues(new Uint8Array(12));
-                prekeysSend[i].privKey = await crypto.subtle.encrypt(
-                    { name: "AES-GCM", iv: iv },
-                    encKey,
-                    ensureArrayBuffer(opk[i].keyPair.privKey)
-                );
-
-                prekeysSend[i].iv = arrayBufferToBase64(iv.buffer);
-                prekeysSend[i].privKey = arrayBufferToBase64(
-                    prekeysSend[i].privKey
-                );
-            }
-
-            const opkReq = await fetch(
-                "http://localhost:8080/auth/upload-prekeys",
-                {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "X-CSRF-Token": res.csrfToken,
-                    },
-                    body: JSON.stringify({
-                        prekeys: prekeysSend,
-                    }), // send one-time prekeys if signing up
-                    credentials: "include",
-                }
-            );
-
-            const opkRes = await opkReq.json();
-            if (opkReq.status !== 200) {
-                console.error(
-                    "[ERROR][SIGNUP] Failed to upload one-time prekeys! Status: " +
-                        opkReq.statusText
-                );
-                document.getElementById("login-error").innerText =
-                    "Failed to upload one-time prekeys! Please refresh and try again. (" +
-                    opkRes.error +
-                    ")";
-                clearInterval(interval);
-                document.getElementById("login-overlay").style.display = "none";
-                setCSRFToken(opkRes.csrfToken);
-                return;
-            }
-
-            setCSRFToken(opkRes.csrfToken);
-            opkCsrftoken = opkRes.csrfToken;
-        }
-
-        // Variables for signal keys storage
-        let id_key, spk_key;
-
         if (signup) {
             // Signup flow
             // Encrypt private keys before uploading
             const idkIV = crypto.getRandomValues(new Uint8Array(12));
-            const spkIV = crypto.getRandomValues(new Uint8Array(12));
+            // const spkIV = crypto.getRandomValues(new Uint8Array(12));
 
             const encryptedIdentityKey = await crypto.subtle.encrypt(
                 { name: "AES-GCM", iv: new Uint8Array(idkIV) },
                 encKey,
-                ensureArrayBuffer(privateKeys.identityKey)
+                ensureArrayBuffer(privateKeys.identityKey.privKey)
             );
 
-            const spk = await crypto.subtle.encrypt(
-                { name: "AES-GCM", iv: new Uint8Array(spkIV) },
-                encKey,
-                ensureArrayBuffer(privateKeys.signedPreKey)
-            );
+            // const spk = await crypto.subtle.encrypt(
+            //     { name: "AES-GCM", iv: new Uint8Array(spkIV) },
+            //     encKey,
+            //     ensureArrayBuffer(privateKeys.signedPreKey)
+            // );
             console.log(
                 "[INFO][SIGNUP] Securely storing Signal Protocol private keys..."
             );
-            console.log(opkCsrftoken);
             const keyReq = await fetch(
                 "http://localhost:8080/auth/upload-privkeys",
                 {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
-                        "X-CSRF-Token": opkCsrftoken,
+                        "X-CSRF-Token": prevCsrfToken,
                     },
                     body: JSON.stringify({
                         identityKey: arrayBufferToBase64(encryptedIdentityKey),
                         idkIV: arrayBufferToBase64(idkIV.buffer),
-                        signedPreKey: arrayBufferToBase64(spk),
-                        spkIV: arrayBufferToBase64(spkIV.buffer),
+                        // signedPreKey: arrayBufferToBase64(spk),
+                        // spkIV: arrayBufferToBase64(spkIV.buffer),
                         verifierKey: await window.crypto.subtle
                             .exportKey("raw", verifierKey)
                             .then((buf) => arrayBufferToBase64(buf)),
@@ -657,8 +473,11 @@ export default function Auth() {
                 }
             );
 
+            const keyRes = await keyReq.json();
+            prevCsrfToken = keyRes.csrfToken;
+            setCSRFToken(keyRes.csrfToken);
+
             if (keyReq.status !== 200) {
-                const keyRes = await keyReq.json();
                 console.error(
                     "[ERROR][SIGNUP] Failed to upload private keys! Status: " +
                         keyReq.statusText
@@ -683,38 +502,153 @@ export default function Auth() {
                 encKey,
                 ensureArrayBuffer(res.identityKey)
             );
-            const decryptedSignedPreKey = await crypto.subtle.decrypt(
-                {
-                    name: "AES-GCM",
-                    iv: ensureArrayBuffer(res.spkIV),
-                },
+            // const decryptedSignedPreKey = await crypto.subtle.decrypt(
+            //     {
+            //         name: "AES-GCM",
+            //         iv: ensureArrayBuffer(res.spkIV),
+            //     },
+            //     encKey,
+            //     ensureArrayBuffer(res.signedPreKey)
+            // );
+
+            privateKeys.identityKey.privKey = decryptedIdentityKey;
+            // spk_key = decryptedSignedPreKey;
+        }
+
+        // Login & Signup flow
+        // Registering a new device
+        // Upload One-time Prekeys to server
+        console.log("[INFO][BOTH] Generating keys for device registration...");
+
+        // Generating one-time prekeys
+        const OPK_COUNT = 50;
+
+        for (let i = 0; i < OPK_COUNT; i++) {
+            const prekey = await libsignal.KeyHelper.generatePreKey(i + 1);
+            opk.push(prekey);
+        }
+
+        const prekeysSend = opk.map((pk) => ({
+            keyId: pk.keyId,
+            publicKey: arrayBufferToBase64(pk.keyPair.pubKey),
+            privKey: null,
+            iv: null,
+        }));
+
+        for (let i = 0; i < prekeysSend.length; i++) {
+            const iv = crypto.getRandomValues(new Uint8Array(12));
+            prekeysSend[i].privKey = await crypto.subtle.encrypt(
+                { name: "AES-GCM", iv: iv },
                 encKey,
-                ensureArrayBuffer(res.signedPreKey)
+                ensureArrayBuffer(opk[i].keyPair.privKey)
             );
 
-            id_key = decryptedIdentityKey;
-            spk_key = decryptedSignedPreKey;
+            prekeysSend[i].iv = arrayBufferToBase64(iv.buffer);
+            prekeysSend[i].privKey = arrayBufferToBase64(
+                prekeysSend[i].privKey
+            );
         }
+
+        // Generating signed prekey
+        const signedPrekeyId = Math.floor(Math.random() * 1e9); // stable unique id for this prekey
+
+        console.log(privateKeys.identityKey);
+        const signedPreKey = await libsignal.KeyHelper.generateSignedPreKey(
+            privateKeys.identityKey,
+            signedPrekeyId
+        );
+        privateKeys.signedPreKey = signedPreKey;
+
+        // Signed pre-key signature verification
+        const lib = await libsignal.default(); // Returns a Curve instance object
+
+        // Use the async verifier and treat "no throw" as valid
+        let verified = false;
+        try {
+            // This will throw on an invalid signature (per the library implementation)
+            await lib.Curve.async.verifySignature(
+                privateKeys.identityKey.pubKey,
+                signedPreKey.keyPair.pubKey,
+                signedPreKey.signature
+            );
+            // If we reached here, verification succeeded
+            verified = true;
+        } catch (err) {
+            console.error(
+                "[ERROR][SIGNUP] Signature verification failed:",
+                err
+            );
+            verified = false;
+        }
+
+        console.log(
+            "[INFO][BOTH] Key validation result: " + verified +
+            ". Registering device..."
+        );
+        if (!verified) {
+            console.error(
+                "[ERROR][BOTH] Key signature verification failed. Keys need to be regenerated."
+            );
+            document.getElementById("login-error").innerText =
+                "Failed to securely create your account! Signature verification failed.";
+            return;
+        }
+
+        const registrationReq = await fetch(
+            "http://localhost:8080/auth/register-device",
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRF-Token": prevCsrfToken,
+                },
+                body: JSON.stringify({
+                    prekeys: prekeysSend,
+                    spkId: signedPrekeyId,
+                    spkPubKey: arrayBufferToBase64(signedPreKey.keyPair.pubKey),
+                    spkSignature: arrayBufferToBase64(signedPreKey.signature),
+                    identityKey: arrayBufferToBase64(
+                        privateKeys.identityKey.pubKey
+                    ),
+                }),
+                credentials: "include",
+            }
+        );
+
+        const registrationRes = await registrationReq.json();
+        if (registrationReq.status !== 200) {
+            console.error(
+                "[ERROR][BOTH] Failed to register device! Status: " +
+                    registrationReq.statusText
+            );
+            document.getElementById("login-error").innerText =
+                "Failed to register device! Please refresh and try again. (" +
+                registrationRes.error +
+                ")";
+            clearInterval(interval);
+            document.getElementById("login-overlay").style.display = "none";
+            setCSRFToken(registrationRes.csrfToken);
+            return;
+        }
+
+        setCSRFToken(registrationRes.csrfToken);
+        prevCsrfToken = registrationRes.csrfToken;
 
         // Store keys in adiStore (for libsignal)
         adiStore.putIdentityKeyPair({
-            privKey: ensureArrayBuffer(
-                signup ? privateKeys.identityKey : id_key
-            ),
+            privKey: ensureArrayBuffer(privateKeys.identityKey.privKey),
             pubKey: ensureArrayBuffer(res.prekeyBundle.identityKey),
         });
 
         adiStore.putLocalRegistrationId(res.prekeyBundle.registrationId);
 
-        adiStore.storeSignedPreKey(res.prekeyBundle.signedPreKey.keyId, {
+        adiStore.storeSignedPreKey(privateKeys.signedPreKey.keyId, {
             privKey: ensureArrayBuffer(
-                signup ? privateKeys.signedPreKey : spk_key
+                privateKeys.signedPreKey.keyPair.privKey
             ),
-            pubKey: ensureArrayBuffer(res.prekeyBundle.signedPreKey.publicKey),
-            signature: ensureArrayBuffer(
-                res.prekeyBundle.signedPreKey.signature
-            ),
-            keyId: res.prekeyBundle.signedPreKey.keyId,
+            pubKey: ensureArrayBuffer(privateKeys.signedPreKey.keyPair.pubKey),
+            signature: ensureArrayBuffer(privateKeys.signedPreKey.signature),
+            keyId: privateKeys.signedPreKey.keyId,
         });
 
         for (let i = 0; i < res.oneTimePreKeys.length; i++) {
@@ -735,154 +669,6 @@ export default function Auth() {
                 keyId: opk.keyId,
             });
         }
-
-        // Create an instance of indexedDB to store keys locally
-        // let db;
-        // const openRequest = window.indexedDB.open("cyber_netwire_libsignal");
-
-        // openRequest.onsuccess = (event) => {
-        //     db = event.target.result;
-
-        // // Ensure required object stores exist. If not, close and reopen with a version bump
-        // const needsUpgrade =
-        //     !db.objectStoreNames.contains("identityKey") ||
-        //     !db.objectStoreNames.contains("signedPreKey");
-
-        // Function to store keys
-        // const storeKeys = (database) => {
-        //     try {
-        //         const tx = database.transaction(
-        //             ["identityKey", "signedPreKey"],
-        //             "readwrite"
-        //         );
-        //         const idStore = tx.objectStore("identityKey");
-        //         const spkStore = tx.objectStore("signedPreKey");
-
-        //         idStore.put({
-        //             id: "identityKey",
-        //             key: ensureArrayBuffer(
-        //                 signup ? privateKeys.identityKey : id_key
-        //             ),
-        //         });
-
-        //         spkStore.put({
-        //             id: "signedPreKey",
-        //             key: ensureArrayBuffer(
-        //                 signup ? privateKeys.signedPreKey : spk_key
-        //             ),
-        //         });
-
-        //         tx.oncomplete = () => {
-        //             console.log(
-        //                 "[INFO][LOGIN] Signal Protocol private keys stored successfully."
-        //             );
-        //             // Proceed to service worker setup
-        //             serviceWorkerSetup();
-        //         };
-
-        //         tx.onerror = (err) => {
-        //             console.error(
-        //                 "[ERROR][LOGIN] Failed to store Signal Protocol keys:",
-        //                 err
-        //             );
-        //         };
-        //     } catch (err) {
-        //         console.error(
-        //             "[ERROR][LOGIN] IndexedDB transaction error while storing keys:",
-        //             err
-        //         );
-        //     }
-        // };
-
-        //     // If upgrade needed, do it
-        //     if (needsUpgrade) {
-        //         // Close current connection and open with a bumped version to create missing stores
-        //         const nextVersion = db.version + 1;
-        //         db.close();
-        //         const upgradeReq = window.indexedDB.open(
-        //             "cyber_netwire_libsignal",
-        //             nextVersion
-        //         );
-
-        //         upgradeReq.onupgradeneeded = (ev) => {
-        //             const upgradeDb = ev.target.result;
-        //             if (!upgradeDb.objectStoreNames.contains("identityKey")) {
-        //                 upgradeDb.createObjectStore("identityKey", {
-        //                     keyPath: "id",
-        //                 });
-        //             }
-        //             if (!upgradeDb.objectStoreNames.contains("signedPreKey")) {
-        //                 upgradeDb.createObjectStore("signedPreKey", {
-        //                     keyPath: "id",
-        //                 });
-        //             }
-        //         };
-
-        //         upgradeReq.onsuccess = (ev) => {
-        //             db = ev.target.result;
-        //             storeKeys(db);
-        //         };
-
-        //         upgradeReq.onerror = (ev) => {
-        //             console.error(
-        //                 "[ERROR][LOGIN] Failed to upgrade IndexedDB to create object stores:",
-        //                 ev.target.error
-        //             );
-        //         };
-        //     } else {
-        //         storeKeys(db);
-        //     }
-        // };
-
-        // openRequest.onerror = (event) => {
-        //     console.error(
-        //         "[ERROR][LOGIN] Failed to create IndexedDB instance for libsignal:",
-        //         event.target.errorCode
-        //     );
-        //     alert(
-        //         "We understand you are worried about your privacy, but we require indexedDB to securely store your encryption keys locally. Please enable it in your browser settings and try again."
-        //     );
-        //     return;
-        // };
-
-        // openRequest.onupgradeneeded = (event) => {
-        //     db = event.target.result;
-        //     // Create object stores
-        //     const idStore = db.createObjectStore("identityKey", {
-        //         keyPath: "id",
-        //     });
-
-        //     const spkStore = db.createObjectStore("signedPreKey", {
-        //         keyPath: "id",
-        //     });
-
-        //     console.log(
-        //         "[INFO][LOGIN] IndexedDB object stores for libsignal created/verified successfully."
-        //     );
-
-        //     // Error handling
-        //     idStore.onerror = (event) => {
-        //         console.error(
-        //             "[ERROR][LOGIN] Failed to create identityKey object store:",
-        //             event.target.errorCode
-        //         );
-        //         alert(
-        //             "We understand you are worried about your privacy, but we require indexedDB to securely store your encryption keys locally. Please enable it in your browser settings and try again."
-        //         );
-        //         return;
-        //     };
-
-        //     spkStore.onerror = (event) => {
-        //         console.error(
-        //             "[ERROR][LOGIN] Failed to create signedPreKey object store:",
-        //             event.target.errorCode
-        //         );
-        //         alert(
-        //             "We understand you are worried about your privacy, but we require indexedDB to securely store your encryption keys locally. Please enable it in your browser settings and try again."
-        //         );
-        //         return;
-        //     };
-        // };
 
         // ! SIGNAL IMPLEMENTATION STOPS HERE
 

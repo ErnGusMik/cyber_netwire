@@ -258,15 +258,12 @@ const validateCSRFToken = (req, res) => {
 
 const uploadUserKeys = async (userId, keyBundle) => {
     const res = await query(
-        "INSERT INTO user_keys (user_id, device_id, registration_id, identity_key, spk_id, spk_public_key, spk_signature, timestamp) VALUES ($1, $2, $3, $4, $5, $6, $7, to_timestamp($8 / 1000.0)) RETURNING *",
+        "INSERT INTO user_keys (user_id, device_id, registration_id, identity_key, created_at) VALUES ($1, $2, $3, $4, to_timestamp($5 / 1000.0)) RETURNING *",
         [
             userId,
             keyBundle.deviceId || 1,
             keyBundle.registrationId,
             toBuffer(keyBundle.identityKey),
-            keyBundle.signedPreKey.keyId,
-            toBuffer(keyBundle.signedPreKey.publicKey),
-            toBuffer(keyBundle.signedPreKey.signature),
             keyBundle.timestamp || Date.now(),
         ]
     );
@@ -274,7 +271,7 @@ const uploadUserKeys = async (userId, keyBundle) => {
     return res.rows[0];
 };
 
-const uploadOneTimePrekeys = async (userId, preKeys) => {
+const uploadOneTimePrekeys = async (userId, preKeys, deviceId) => {
     if (!preKeys || !Array.isArray(preKeys) || preKeys.length === 0) return 0;
 
     // Use a client from the pool for transaction
@@ -283,12 +280,12 @@ const uploadOneTimePrekeys = async (userId, preKeys) => {
         await client.query("BEGIN");
 
         const insertText =
-            "INSERT INTO opk_keys (user_id, key_id, public_key, priv_key, key_iv) VALUES ($1, $2, $3, $4, $5)";
+            "INSERT INTO opk_keys (user_id, key_id, public_key, priv_key, key_iv, device_id) VALUES ($1, $2, $3, $4, $5, $6)";
         let inserted = 0;
 
         for (const pk of preKeys) {
             const bufPub = toBuffer(pk.publicKey);
-            await client.query(insertText, [userId, pk.keyId, bufPub, toBuffer(pk.privKey), toBuffer(pk.iv)]);
+            await client.query(insertText, [userId, pk.keyId, bufPub, toBuffer(pk.privKey), toBuffer(pk.iv), deviceId]);
             inserted++;
         }
 
@@ -303,10 +300,10 @@ const uploadOneTimePrekeys = async (userId, preKeys) => {
     }
 };
 
-const uploadPrivateKeys = async (userId, identityKey, signedPreKey, idkIV, spkIV) => {
+const uploadPrivateKeys = async (userId, identityKey, idkIV,) => {
     const res = await query(
-        "INSERT INTO priv_keys (user_id, identity_key, signed_prekey, idk_iv, spk_iv) VALUES ($1, $2, $3, $4, $5) RETURNING *",
-        [userId, toBuffer(identityKey), toBuffer(signedPreKey), toBuffer(idkIV), toBuffer(spkIV)]
+        "INSERT INTO priv_keys (user_id, identity_key, idk_iv) VALUES ($1, $2, $3) RETURNING *",
+        [userId, toBuffer(identityKey), toBuffer(idkIV)]
     );
 
     return res.rows[0];
@@ -354,6 +351,31 @@ const fetchAllOPKs = async (userId) => {
     }));
 }
 
+const registerDevice = async (userId, spkId, spkPubKey, spkSignature, identityKey) => {
+    const res = await query(
+        "INSERT INTO device_keys (user_id, spk_id, spk_public_key, spk_signature, identity_key, last_seen) VALUES ($1, $2, $3, $4, $5, to_timestamp($6 / 1000.0)) RETURNING device_id",
+        [userId, spkId, toBuffer(spkPubKey), toBuffer(spkSignature), toBuffer(identityKey), Date.now()]
+    );
+    return res.rows[0].device_id;
+}
+
+const fetchRegistrationBundle = async (userId) => {
+    const bundleRes = await query(
+        "SELECT * FROM user_keys WHERE user_id = $1",
+        [userId]
+    );
+    if (bundleRes.rows.length === 0) {
+        return null;
+    }
+    const bundle = {
+        registrationId: bundleRes.rows[0].registration_id,
+        deviceId: bundleRes.rows[0].device_id,
+        identityKey: arrayBufferToBase64Node(bundleRes.rows[0].identity_key), // ArrayBuffer
+    };
+
+    return bundle;
+}
+
 export {
     checkIfUserExists,
     createUser,
@@ -366,4 +388,6 @@ export {
     addLibsignalVerifier,
     loadPrivateKeys,
     fetchAllOPKs,
+    registerDevice,
+    fetchRegistrationBundle,
 };

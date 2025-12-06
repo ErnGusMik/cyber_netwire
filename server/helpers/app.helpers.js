@@ -107,29 +107,35 @@ const getUserFromDisplayName = async (displayName, user_no) => {
     return result;
 };
 
-const fetchPrekeyBundle = async (userId) => {
-    const bundleRes = await query(
+const fetchPrekeyBundle = async (userId, deviceId) => {
+    const identityBundle = await query(
         "SELECT * FROM user_keys WHERE user_id = $1",
         [userId]
     );
-    if (bundleRes.rows.length === 0) {
+    if (identityBundle.rows.length === 0) {
         return null;
     }
+
+    const deviceBundle = await query(
+        "SELECT * FROM device_keys WHERE user_id = $1 AND device_id = $2",
+        [userId, deviceId]
+    );
+
     const bundle = {
-        registrationId: bundleRes.rows[0].registration_id,
-        deviceId: bundleRes.rows[0].device_id,
-        identityKey: arrayBufferToBase64Node(bundleRes.rows[0].identity_key), // ArrayBuffer
+        registrationId: identityBundle.rows[0].registration_id,
+        deviceId: deviceBundle.rows[0].device_id,
+        identityKey: arrayBufferToBase64Node(identityBundle.rows[0].identity_key), // ArrayBuffer
         signedPreKey: {
-            keyId: bundleRes.rows[0].spk_id,
-            publicKey: arrayBufferToBase64Node(bundleRes.rows[0].spk_public_key), // ArrayBuffer
-            signature: arrayBufferToBase64Node(bundleRes.rows[0].spk_signature), // ArrayBuffer
+            keyId: deviceBundle.rows[0].spk_id,
+            publicKey: arrayBufferToBase64Node(deviceBundle.rows[0].spk_public_key), // ArrayBuffer
+            signature: arrayBufferToBase64Node(deviceBundle.rows[0].spk_signature), // ArrayBuffer
         },
         preKey: {},
     };
 
     const prekeyRes = await query(
-        "SELECT * FROM opk_keys WHERE user_id = $1 AND is_used = false ORDER BY key_id ASC LIMIT 1",
-        [userId]
+        "SELECT * FROM opk_keys WHERE user_id = $1 AND is_used = false AND device_id = $2 ORDER BY key_id ASC LIMIT 1",
+        [userId, deviceId]
     );
 
     if (prekeyRes.rows.length > 0) {
