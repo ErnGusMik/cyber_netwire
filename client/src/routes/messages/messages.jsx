@@ -160,8 +160,6 @@ export default function Messages() {
         // ! SIGNAL PROTOCOL IMPLEMENTATION STARTS HERE
         // New chat flow (X3DH key exchange + Diffie-Hellman ratchet init)
         // 1. Fetch prekey bundle of other user
-        console.log("ADI Store: ", adiStore);
-
         const bundle = {
             identityKey: ensureArrayBuffer(res.prekeyBundle.identityKey),
             signedPreKey: {
@@ -179,20 +177,27 @@ export default function Messages() {
             },
             registrationId: res.prekeyBundle.registrationId,
         };
-        console.log("Bundle: ", bundle);
 
+        // 2. Create SignalProtocolAddress for the other user
         const address = new libsignal.SignalProtocolAddress(
             res.userId.toString(),
             res.prekeyBundle.deviceId
         );
-        console.log("Address: ", address);
 
+        // 3. Create session builder
         const sessionBuilder = new libsignal.SessionBuilder(adiStore, address);
 
+        // 4. Process prekey bundle to establish session
         const session = await sessionBuilder.processPreKey(bundle);
-        console.log("Session: ", session);
 
         // TODO: use example app (open in github) to complete te session init
+
+        const sessionCipher = new libsignal.SessionCipher(adiStore, address);
+        const cipphertext = await sessionCipher.encrypt(
+            Uint8Array.from([0, 0, 0, 0]).buffer
+        );
+
+        
 
         // Redirect to new chat
         document.querySelector(".add-overlay").style.display = "none";
