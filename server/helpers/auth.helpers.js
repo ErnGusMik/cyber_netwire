@@ -331,9 +331,7 @@ const loadPrivateKeys = async (userId) => {
     }
     const keys = {
         identity_key: arrayBufferToBase64Node(res.rows[0].identity_key),
-        signed_prekey: arrayBufferToBase64Node(res.rows[0].signed_prekey),
         idk_iv: arrayBufferToBase64Node(res.rows[0].idk_iv),
-        spk_iv: arrayBufferToBase64Node(res.rows[0].spk_iv),
     }
     return keys;
 }

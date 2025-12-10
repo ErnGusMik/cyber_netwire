@@ -159,45 +159,93 @@ export default function Messages() {
 
         // ! SIGNAL PROTOCOL IMPLEMENTATION STARTS HERE
         // New chat flow (X3DH key exchange + Diffie-Hellman ratchet init)
+
+        if (res.prekeyBundle.length !== 1) {
+            console.log("[ERROR] Chat type and user count mismatch");
+        }
+
+        for (let i = 0; i < res.prekeyBundle[0].bundles.length; i++) {
+            const bundle = {
+                identityKey: ensureArrayBuffer(res.prekeyBundle.identityKey),
+                signedPreKey: {
+                    keyId: res.prekeyBundle.signedPreKey.keyId,
+                    publicKey: ensureArrayBuffer(
+                        res.prekeyBundle.signedPreKey.publicKey
+                    ),
+                    signature: ensureArrayBuffer(
+                        res.prekeyBundle.signedPreKey.signature
+                    ),
+                },
+                preKey: {
+                    keyId: res.prekeyBundle.preKey.keyId,
+                    publicKey: ensureArrayBuffer(
+                        res.prekeyBundle.preKey.publicKey
+                    ),
+                },
+                registrationId: res.prekeyBundle.registrationId,
+            };
+
+            // 2. Create SignalProtocolAddress for the other user
+            const address = new libsignal.SignalProtocolAddress(
+                res.userId.toString(),
+                res.prekeyBundle.deviceId
+            );
+
+            // 3. Create session builder
+            const sessionBuilder = new libsignal.SessionBuilder(
+                adiStore,
+                address
+            );
+
+            // 4. Process prekey bundle to establish session
+            const session = await sessionBuilder.processPreKey(bundle);
+
+            const sessionCipher = new libsignal.SessionCipher(
+                adiStore,
+                address
+            );
+            const cipphertext = await sessionCipher.encrypt(
+                Uint8Array.from([0, 0, 0, 0]).buffer
+            );
+        }
+
         // 1. Fetch prekey bundle of other user
-        const bundle = {
-            identityKey: ensureArrayBuffer(res.prekeyBundle.identityKey),
-            signedPreKey: {
-                keyId: res.prekeyBundle.signedPreKey.keyId,
-                publicKey: ensureArrayBuffer(
-                    res.prekeyBundle.signedPreKey.publicKey
-                ),
-                signature: ensureArrayBuffer(
-                    res.prekeyBundle.signedPreKey.signature
-                ),
-            },
-            preKey: {
-                keyId: res.prekeyBundle.preKey.keyId,
-                publicKey: ensureArrayBuffer(res.prekeyBundle.preKey.publicKey),
-            },
-            registrationId: res.prekeyBundle.registrationId,
-        };
+        // const bundle = {
+        //     identityKey: ensureArrayBuffer(res.prekeyBundle.identityKey),
+        //     signedPreKey: {
+        //         keyId: res.prekeyBundle.signedPreKey.keyId,
+        //         publicKey: ensureArrayBuffer(
+        //             res.prekeyBundle.signedPreKey.publicKey
+        //         ),
+        //         signature: ensureArrayBuffer(
+        //             res.prekeyBundle.signedPreKey.signature
+        //         ),
+        //     },
+        //     preKey: {
+        //         keyId: res.prekeyBundle.preKey.keyId,
+        //         publicKey: ensureArrayBuffer(res.prekeyBundle.preKey.publicKey),
+        //     },
+        //     registrationId: res.prekeyBundle.registrationId,
+        // };
 
-        // 2. Create SignalProtocolAddress for the other user
-        const address = new libsignal.SignalProtocolAddress(
-            res.userId.toString(),
-            res.prekeyBundle.deviceId
-        );
+        // // 2. Create SignalProtocolAddress for the other user
+        // const address = new libsignal.SignalProtocolAddress(
+        //     res.userId.toString(),
+        //     res.prekeyBundle.deviceId
+        // );
 
-        // 3. Create session builder
-        const sessionBuilder = new libsignal.SessionBuilder(adiStore, address);
+        // // 3. Create session builder
+        // const sessionBuilder = new libsignal.SessionBuilder(adiStore, address);
 
-        // 4. Process prekey bundle to establish session
-        const session = await sessionBuilder.processPreKey(bundle);
+        // // 4. Process prekey bundle to establish session
+        // const session = await sessionBuilder.processPreKey(bundle);
 
-        // TODO: use example app (open in github) to complete te session init
+        // const sessionCipher = new libsignal.SessionCipher(adiStore, address);
+        // const cipphertext = await sessionCipher.encrypt(
+        //     Uint8Array.from([0, 0, 0, 0]).buffer
+        // );
 
-        const sessionCipher = new libsignal.SessionCipher(adiStore, address);
-        const cipphertext = await sessionCipher.encrypt(
-            Uint8Array.from([0, 0, 0, 0]).buffer
-        );
-
-        
+        // TODO: implement per device message encryption. recheck prekey bundle deviceId
 
         // Redirect to new chat
         document.querySelector(".add-overlay").style.display = "none";

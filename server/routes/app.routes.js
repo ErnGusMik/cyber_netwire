@@ -168,12 +168,15 @@ const newChat = async (req, res, next) => {
 
     // Add creator to chat
     await query(
-        "INSERT INTO chat_members (chat_id, user_id, joined_at) VALUES ($1, $2, $3)",
-        [chat.rows[0].id, req.session.userID, new Date().toUTCString()]
+        "INSERT INTO chat_members (chat_id, user_id, joined_at, device_id) VALUES ($1, $2, $3, $4)",
+        [chat.rows[0].id, req.session.userID, new Date().toUTCString(), req.session.deviceId]
     );
 
     // Create random key
     const key = crypto.randomBytes(32);
+
+    // ! SIGNAL PROTOCOL VARIABLES
+    let bundles;
 
     // Add & send key to all members
     for (let i = 0; i < req.body.members.length; i++) {
@@ -182,11 +185,30 @@ const newChat = async (req, res, next) => {
             req.body.members[i].user_no
         );
         await query(
-            "INSERT INTO chat_members (chat_id, user_id, joined_at) VALUES ($1, $2, $3)",
-            [chat.rows[0].id, user.rows[0].id, new Date().toUTCString()]
+            "INSERT INTO chat_members (chat_id, user_id, joined_at, device_id) VALUES ($1, $2, $3, $4)",
+            [chat.rows[0].id, user.rows[0].id, new Date().toUTCString(), user.rows[0].deviceId]
         );
 
         await sendKey(key, user.rows[0].id, chat.rows[0].id, 1);
+
+        // ! SIGNAL PROTOCOL IMPLEMENTATION STARTS HERE
+        // Initial key exchange (X3DH)
+        // Fetch Prekey bundle
+        // TODO NEXT: figure out storage -- where and what to store for multiple devices   
+        const prekeyBundles = await fetchPrekeyBundle(user.rows[0].id);
+        if (prekeyBundles.length === 0 || prekeyBundles === null) {
+            res.status(500).send({
+                error: "Failed to fetch Prekey Bundle for Signal Protocol",
+            });
+            return;
+        }
+        console.log("Prekey Bundle fetched for user ID:", user.rows[0].id);
+        console.log(prekeyBundles);
+        bundles.push({
+            user_id: user.rows[0].id,
+            bundles: prekeyBundles,
+        })
+        // ! SIGNAL PROTOCOL IMPLEMENTATION ENDS HERE
     }
 
     // Send key to creator
@@ -195,22 +217,22 @@ const newChat = async (req, res, next) => {
     // ! SIGNAL PROTOCOL IMPLEMENTATION STARTS HERE
     // DMs initial key exchange
     // Fetch Prekey bundle
-    const prekeyBundle = await fetchPrekeyBundle(req.session.userID, req.body.device_id);
-    if (prekeyBundle === null) {
-        res.status(500).send({
-            error: "Failed to fetch Prekey Bundle for Signal Protocol",
-        });
-        return;
-    }
-    console.log("Prekey Bundle fetched for user ID:", req.session.userID);
-    console.log(prekeyBundle);
+    // const prekeyBundle = await fetchPrekeyBundle(req.session.userID, req.body.device_id);
+    // if (prekeyBundle === null) {
+    //     res.status(500).send({
+    //         error: "Failed to fetch Prekey Bundle for Signal Protocol",
+    //     });
+    //     return;
+    // }
+    // console.log("Prekey Bundle fetched for user ID:", req.session.userID);
+    // console.log(prekeyBundle);
     // ! SIGNAL PROTOCOL IMPLEMENTATION ENDS HERE
 
     res.status(201).send({
         chat_id: chat.rows[0].id,
         userId: req.session.userID,
         csrfToken: csrf,
-        prekeyBundle: prekeyBundle,
+        prekeyBundle: bundles,
     });
 };
 

@@ -12,6 +12,7 @@ import { type } from "@testing-library/user-event/dist/type";
 import adiStore from "../../adiStore";
 
 import { Argon2, Argon2Mode } from "@sphereon/isomorphic-argon2";
+import { ident } from "pg-format";
 
 export default function Auth() {
     const [signup, setSignup] = useState(false);
@@ -233,7 +234,12 @@ export default function Auth() {
 
         // ! SIGNAL PROTOCOL IMPLEMENTATION VARIABLES
         let registrationBundle;
-        let privateKeys = {}; // To store private keys for later upload
+        let privateKeys = {
+            identityKey: {
+                pubKey: null,
+                privKey: null,
+            },
+        }; // To store private keys for later upload
         const opk = []; // One-time PreKeys
         let signalVerifier; // Password verifier key
         let prevCsrfToken = csrfToken;

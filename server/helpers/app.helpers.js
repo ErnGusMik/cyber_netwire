@@ -107,7 +107,7 @@ const getUserFromDisplayName = async (displayName, user_no) => {
     return result;
 };
 
-const fetchPrekeyBundle = async (userId, deviceId) => {
+const fetchPrekeyBundle = async (userId) => {
     const identityBundle = await query(
         "SELECT * FROM user_keys WHERE user_id = $1",
         [userId]
@@ -116,41 +116,66 @@ const fetchPrekeyBundle = async (userId, deviceId) => {
         return null;
     }
 
-    const deviceBundle = await query(
-        "SELECT * FROM device_keys WHERE user_id = $1 AND device_id = $2",
-        [userId, deviceId]
+    let allBundles = [];
+    const deviceBundles = await query(
+        "SELECT * FROM device_keys WHERE user_id = $1",
+        [userId]
     );
 
-    const bundle = {
-        registrationId: identityBundle.rows[0].registration_id,
-        deviceId: deviceBundle.rows[0].device_id,
-        identityKey: arrayBufferToBase64Node(identityBundle.rows[0].identity_key), // ArrayBuffer
-        signedPreKey: {
-            keyId: deviceBundle.rows[0].spk_id,
-            publicKey: arrayBufferToBase64Node(deviceBundle.rows[0].spk_public_key), // ArrayBuffer
-            signature: arrayBufferToBase64Node(deviceBundle.rows[0].spk_signature), // ArrayBuffer
-        },
-        preKey: {},
-    };
-
-    const prekeyRes = await query(
-        "SELECT * FROM opk_keys WHERE user_id = $1 AND is_used = false AND device_id = $2 ORDER BY key_id ASC LIMIT 1",
-        [userId, deviceId]
-    );
-
-    if (prekeyRes.rows.length > 0) {
-        bundle.preKey = {
-            keyId: prekeyRes.rows[0].key_id,
-            publicKey: arrayBufferToBase64Node(prekeyRes.rows[0].public_key), // ArrayBuffer
+    for (let device of deviceBundles.rows) {
+        const bundle = {
+            registrationId: identityBundle.rows[0].registration_id,
+            deviceId: device.device_id,
+            identityKey: arrayBufferToBase64Node(
+                identityBundle.rows[0].identity_key
+            ), // ArrayBuffer
+            signedPreKey: {
+                keyId: device.spk_id,
+                publicKey: arrayBufferToBase64Node(device.spk_public_key), // ArrayBuffer
+                signature: arrayBufferToBase64Node(device.spk_signature), // ArrayBuffer
+            },
+            preKey: {},
         };
+        const prekeyRes = await query(
+            "SELECT * FROM opk_keys WHERE user_id = $1 AND is_used = false AND device_id = $2 ORDER BY key_id ASC LIMIT 1",
+            [userId, device.device_id]
+        );
+
+        if (prekeyRes.rows.length > 0) {
+            bundle.preKey = {
+                keyId: prekeyRes.rows[0].key_id,
+                publicKey: arrayBufferToBase64Node(
+                    prekeyRes.rows[0].public_key
+                ), // ArrayBuffer
+            };
+        }
+        
+        await query(
+            "UPDATE opk_keys SET is_used = true WHERE user_id = $1 AND key_id = $2",
+            [userId, bundle.preKey.keyId]
+        );
+        allBundles.push(bundle);
     }
 
-    await query(
-        "UPDATE opk_keys SET is_used = true WHERE user_id = $1 AND key_id = $2",
-        [userId, bundle.preKey.keyId]
-    );
+    // const bundle = {
+    //     registrationId: identityBundle.rows[0].registration_id,
+    //     deviceId: deviceBundle.rows[0].device_id,
+    //     identityKey: arrayBufferToBase64Node(
+    //         identityBundle.rows[0].identity_key
+    //     ), // ArrayBuffer
+    //     signedPreKey: {
+    //         keyId: deviceBundle.rows[0].spk_id,
+    //         publicKey: arrayBufferToBase64Node(
+    //             deviceBundle.rows[0].spk_public_key
+    //         ), // ArrayBuffer
+    //         signature: arrayBufferToBase64Node(
+    //             deviceBundle.rows[0].spk_signature
+    //         ), // ArrayBuffer
+    //     },
+    //     preKey: {},
+    // };
 
-    return bundle;
+    return allBundles;
 };
 
 export {
