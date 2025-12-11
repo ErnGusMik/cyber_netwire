@@ -95,16 +95,16 @@ const sendKey = async (key, user_id, chat_id, key_version) => {
 };
 
 const getUserFromDisplayName = async (displayName, user_no) => {
-    const result = await query(
-        'SELECT * FROM "user" WHERE display_name = $1 AND user_no = $2',
+    const userResult = await query(
+        `SELECT * FROM "user" WHERE display_name = $1 AND user_no = $2`,
         [displayName, user_no]
     );
 
-    if (result.rowCount === 0) {
+    if (userResult.rowCount === 0) {
         return false;
     }
 
-    return result;
+    return userResult;
 };
 
 const fetchPrekeyBundle = async (userId) => {
@@ -149,7 +149,7 @@ const fetchPrekeyBundle = async (userId) => {
                 ), // ArrayBuffer
             };
         }
-        
+
         await query(
             "UPDATE opk_keys SET is_used = true WHERE user_id = $1 AND key_id = $2",
             [userId, bundle.preKey.keyId]

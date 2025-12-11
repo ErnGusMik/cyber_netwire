@@ -168,8 +168,8 @@ const newChat = async (req, res, next) => {
 
     // Add creator to chat
     await query(
-        "INSERT INTO chat_members (chat_id, user_id, joined_at, device_id) VALUES ($1, $2, $3, $4)",
-        [chat.rows[0].id, req.session.userID, new Date().toUTCString(), req.session.deviceId]
+        "INSERT INTO chat_members (chat_id, user_id, joined_at) VALUES ($1, $2, $3)",
+        [chat.rows[0].id, req.session.userID, new Date().toUTCString()]
     );
 
     // Create random key
@@ -177,6 +177,7 @@ const newChat = async (req, res, next) => {
 
     // ! SIGNAL PROTOCOL VARIABLES
     let bundles;
+    let user_ids = [];
 
     // Add & send key to all members
     for (let i = 0; i < req.body.members.length; i++) {
@@ -185,8 +186,8 @@ const newChat = async (req, res, next) => {
             req.body.members[i].user_no
         );
         await query(
-            "INSERT INTO chat_members (chat_id, user_id, joined_at, device_id) VALUES ($1, $2, $3, $4)",
-            [chat.rows[0].id, user.rows[0].id, new Date().toUTCString(), user.rows[0].deviceId]
+            "INSERT INTO chat_members (chat_id, user_id, joined_at) VALUES ($1, $2, $3)",
+            [chat.rows[0].id, user.rows[0].id, new Date().toUTCString()]
         );
 
         await sendKey(key, user.rows[0].id, chat.rows[0].id, 1);
@@ -194,7 +195,8 @@ const newChat = async (req, res, next) => {
         // ! SIGNAL PROTOCOL IMPLEMENTATION STARTS HERE
         // Initial key exchange (X3DH)
         // Fetch Prekey bundle
-        // TODO NEXT: figure out storage -- where and what to store for multiple devices   
+        user_ids.push(user.rows[0].id);
+
         const prekeyBundles = await fetchPrekeyBundle(user.rows[0].id);
         if (prekeyBundles.length === 0 || prekeyBundles === null) {
             res.status(500).send({
@@ -204,6 +206,7 @@ const newChat = async (req, res, next) => {
         }
         console.log("Prekey Bundle fetched for user ID:", user.rows[0].id);
         console.log(prekeyBundles);
+        // TODO: debugging this and then chatting (cannot read properties of undefined, reading bundles.push)
         bundles.push({
             user_id: user.rows[0].id,
             bundles: prekeyBundles,
@@ -233,6 +236,7 @@ const newChat = async (req, res, next) => {
         userId: req.session.userID,
         csrfToken: csrf,
         prekeyBundle: bundles,
+        recipientIds: user_ids,
     });
 };
 
@@ -494,7 +498,7 @@ const postMessage = async (req, res, next) => {
 
     // Post message
     await query(
-        "INSERT INTO messages (chat_id, sender_id, content, timestamp) VALUES ($1, $2, $3, $4)",
+        "INSERT INTO messages (chat_id, sender_id, ciphertext_payloads, timestamp) VALUES ($1, $2, $3, $4)",
         [
             req.params.chat_id,
             req.session.userID,

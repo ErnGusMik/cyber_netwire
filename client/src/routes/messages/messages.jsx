@@ -10,6 +10,7 @@ import Boolean from "../../components/boolean/boolean";
 import { useNavigate, NavLink, useParams } from "react-router-dom";
 import { type } from "@testing-library/user-event/dist/type";
 import adiStore from "../../adiStore";
+import msgStore from "../../msgStore";
 
 import * as libsignal from "@privacyresearch/libsignal-protocol-typescript";
 
@@ -164,6 +165,11 @@ export default function Messages() {
             console.log("[ERROR] Chat type and user count mismatch");
         }
 
+        let initial_ciphertexts = {};
+
+        // Store chat info locally
+        msgStore.createChat(res.chat_id, username, res.recipientIds[0]);
+
         for (let i = 0; i < res.prekeyBundle[0].bundles.length; i++) {
             const bundle = {
                 identityKey: ensureArrayBuffer(res.prekeyBundle.identityKey),
@@ -204,10 +210,31 @@ export default function Messages() {
                 adiStore,
                 address
             );
-            const cipphertext = await sessionCipher.encrypt(
+            const ciphertext = await sessionCipher.encrypt(
                 Uint8Array.from([0, 0, 0, 0]).buffer
             );
+            console.log("CIPHERTEXT" + res.prekeyBundle.deviceId + ciphertext);
+            initial_ciphertexts[res.prekeyBundle.deviceId] = ciphertext;
         }
+
+        // Post initial message
+        // const postReq = await fetch(
+        //     `http://localhost:8080/api/chat/${res.chat_id}/post`,
+        //     {
+        //         method: "POST",
+        //         headers: {
+        //             "Content-Type": "application/json",
+        //             "X-CSRF-Token": document.cookie
+        //                 .split("; ")
+        //                 .find((row) => row.startsWith("csrf-token"))
+        //                 .split("=")[1],
+        //         },
+        //         credentials: "include",
+        //         body: JSON.stringify({
+        //             content: initial_ciphertexts,
+        //         }),
+        //     }
+        // )
 
         // 1. Fetch prekey bundle of other user
         // const bundle = {
