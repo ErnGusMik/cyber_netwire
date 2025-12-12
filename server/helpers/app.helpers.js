@@ -178,10 +178,22 @@ const fetchPrekeyBundle = async (userId) => {
     return allBundles;
 };
 
+const checkIfChatExists = async (chatId) => {
+    // Check if chat exists
+    const chat = await query("SELECT id FROM chats WHERE id = $1", [chatId]);
+
+    if (chat.rowCount === 0) {
+        return false;
+    }
+
+    return chat;
+};
+
 export {
     checkIfUserExists,
     checkIfUsersAreFriends,
     sendKey,
     getUserFromDisplayName,
     fetchPrekeyBundle,
+    checkIfChatExists
 };

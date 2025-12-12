@@ -14,7 +14,7 @@
     "@signalapp/libsignal-client": "^0.86.4",
     "@sphereon/isomorphic-argon2": "^1.0.1",
     "@testing-library/jest-dom": "^5.17.0",
-    "@testing-library/react": "^13.4.0",
+    "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^13.5.0",
     "argon2": "^0.44.0",
     "argon2-browser": "^1.18.0",
@@ -28,11 +28,12 @@
     "google-auth-library": "^9.15.0",
     "node-postgres": "^0.6.2",
     "pg-format": "^1.0.4",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react": "^19.1.4",
+    "react-dom": "^19.1.4",
     "react-router-dom": "6.18",
     "react-scripts": "5.0.1",
-    "web-vitals": "^2.1.4"
+    "web-vitals": "^2.1.4",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "concurrently": "^9.0.1"

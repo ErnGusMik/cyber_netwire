@@ -351,7 +351,6 @@ export default function Auth() {
 
         const res = await req.json();
         console.log(res);
-        privateKeys.identityKey.pubKey = base64ToArrayBuffer(res.prekeyBundle.identityKey);
         setCSRFToken(res.csrfToken);
         prevCsrfToken = res.csrfToken;
 
@@ -367,6 +366,9 @@ export default function Auth() {
 
             return;
         }
+        privateKeys.identityKey.pubKey = base64ToArrayBuffer(
+            res.prekeyBundle.identityKey
+        );
 
         console.log("[INFO][BOTH] Decrypting legacy private key...");
         let rsaKey;
@@ -588,8 +590,9 @@ export default function Auth() {
         }
 
         console.log(
-            "[INFO][BOTH] Key validation result: " + verified +
-            ". Registering device..."
+            "[INFO][BOTH] Key validation result: " +
+                verified +
+                ". Registering device..."
         );
         if (!verified) {
             console.error(

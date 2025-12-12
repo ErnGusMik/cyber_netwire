@@ -8,11 +8,10 @@ import {
     checkIfUserExists,
     checkIfUsersAreFriends,
     fetchPrekeyBundle,
+    checkIfChatExists,
 } from "../helpers/app.helpers.js";
 
-import {
-    checkIfUserExists as checkIfUserExistsByEmail
-} from "../helpers/auth.helpers.js";
+import { checkIfUserExists as checkIfUserExistsByEmail } from "../helpers/auth.helpers.js";
 
 const changeStatus = async (req, res, next) => {
     // Check if user is logged in
@@ -176,7 +175,7 @@ const newChat = async (req, res, next) => {
     const key = crypto.randomBytes(32);
 
     // ! SIGNAL PROTOCOL VARIABLES
-    let bundles;
+    let bundles = [];
     let user_ids = [];
 
     // Add & send key to all members
@@ -210,7 +209,7 @@ const newChat = async (req, res, next) => {
         bundles.push({
             user_id: user.rows[0].id,
             bundles: prekeyBundles,
-        })
+        });
         // ! SIGNAL PROTOCOL IMPLEMENTATION ENDS HERE
     }
 
@@ -376,7 +375,7 @@ const getChatMessages = async (req, res, next) => {
     const messages = await query(
         `SELECT
             m.id,
-            m.content,
+            m.ciphertext_payloads,
             m.timestamp,
             u.display_name,
             u.user_no
@@ -467,16 +466,21 @@ const postMessage = async (req, res, next) => {
         return;
     }
 
+    if (!req.body.content) {
+        res.status(400).send({
+            error: "Missing content or header data",
+        });
+        return;
+    }
+
     // Checks CSRF token
     const csrf = validateCSRFToken(req, res);
     if (!csrf) return;
 
     // Check if chat exists
-    const chat = await query("SELECT id FROM chats WHERE id = $1", [
-        req.params.chat_id,
-    ]);
+    const chat = await checkIfChatExists(req.params.chat_id);
 
-    if (chat.rowCount === 0) {
+    if (!chat) {
         res.status(400).send({
             error: "Chat does not exist",
         });
@@ -485,7 +489,7 @@ const postMessage = async (req, res, next) => {
 
     // Check if user is in chat
     const member = await query(
-        "SELECT id FROM chat_members WHERE chat_id = $1 AND user_id = $2",
+        "SELECT * FROM chat_members WHERE chat_id = $1 AND user_id = $2",
         [req.params.chat_id, req.session.userID]
     );
 
@@ -504,6 +508,7 @@ const postMessage = async (req, res, next) => {
             req.session.userID,
             req.body.content,
             new Date().toUTCString(),
+            // req.body.header_data,
         ]
     );
 

@@ -11,6 +11,7 @@ import { useNavigate, NavLink, useParams } from "react-router-dom";
 import { type } from "@testing-library/user-event/dist/type";
 import adiStore from "../../adiStore";
 import msgStore from "../../msgStore";
+import logout from "../../helpers/logout.helper";
 
 import * as libsignal from "@privacyresearch/libsignal-protocol-typescript";
 
@@ -52,14 +53,43 @@ export default function Messages() {
     }
 
     // Browser: base64 -> ArrayBuffer
+    function isBase64String(str) {
+        if (typeof str !== "string") return false;
+        // Basic check: only valid base64 chars and proper padding
+        if (str.length % 4 !== 0) return false;
+        return !/[^A-Za-z0-9+/=\n\r]/.test(str);
+    }
+
     function base64ToArrayBuffer(base64) {
-        const binary = atob(base64);
-        const len = binary.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-            bytes[i] = binary.charCodeAt(i);
+        // Accept ArrayBuffer / TypedArray directly
+        if (!base64) return base64;
+        if (base64 instanceof ArrayBuffer) return base64;
+        if (ArrayBuffer.isView(base64)) return base64.buffer;
+
+        // If it's not a string, try to coerce binary-string-like inputs
+        if (typeof base64 !== "string") {
+            const u8 = new Uint8Array(base64.length || 0);
+            for (let i = 0; i < u8.length; i++) u8[i] = base64[i] & 0xff;
+            return u8.buffer;
         }
-        return bytes.buffer;
+
+        // If it looks like base64, decode using atob
+        if (isBase64String(base64)) {
+            try {
+                const binary = atob(base64.replace(/\s+/g, ""));
+                const len = binary.length;
+                const bytes = new Uint8Array(len);
+                for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i) & 0xff;
+                return bytes.buffer;
+            } catch (e) {
+                // fall through to binary-string fallback
+            }
+        }
+
+        // Fallback: treat input as a binary string where each char code is a byte
+        const u8 = new Uint8Array(base64.length);
+        for (let i = 0; i < base64.length; i++) u8[i] = base64.charCodeAt(i) & 0xff;
+        return u8.buffer;
     }
 
     // Accept either a base64 string or a BufferSource and return an ArrayBuffer
@@ -72,6 +102,20 @@ export default function Messages() {
         if (input && typeof input === "object" && Array.isArray(input.data))
             return new Uint8Array(input.data).buffer;
         return input;
+    }
+
+    // Browser: arrayBuffer -> base64 (chunked to avoid stack issues)
+    function arrayBufferToBase64(arrayBuffer) {
+        const bytes = new Uint8Array(arrayBuffer);
+        const chunkSize = 0x8000;
+        let binary = "";
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+            binary += String.fromCharCode.apply(
+                null,
+                bytes.subarray(i, i + chunkSize)
+            );
+        }
+        return btoa(binary);
     }
 
     // Handle new chat creation
@@ -118,6 +162,7 @@ export default function Messages() {
                 console.log("[ERROR] Could not create feed");
                 console.log(req.error);
                 const res = await req.json();
+                if (req.status === 401) logout();
                 setNewChatError(res.error);
             }
             return;
@@ -155,6 +200,7 @@ export default function Messages() {
             console.log("[ERROR] Could not create chat");
             console.log(res.error);
             setNewChatError(res.error);
+            if (req.status === 401) logout();
             return;
         }
 
@@ -170,25 +216,26 @@ export default function Messages() {
         // Store chat info locally
         msgStore.createChat(res.chat_id, username, res.recipientIds[0]);
 
+        console.log("Prekey Bundle received:", res.prekeyBundle);
+
         for (let i = 0; i < res.prekeyBundle[0].bundles.length; i++) {
+            const resBundle = res.prekeyBundle[0].bundles[i];
             const bundle = {
-                identityKey: ensureArrayBuffer(res.prekeyBundle.identityKey),
+                identityKey: ensureArrayBuffer(resBundle.identityKey),
                 signedPreKey: {
-                    keyId: res.prekeyBundle.signedPreKey.keyId,
+                    keyId: resBundle.signedPreKey.keyId,
                     publicKey: ensureArrayBuffer(
-                        res.prekeyBundle.signedPreKey.publicKey
+                        resBundle.signedPreKey.publicKey
                     ),
                     signature: ensureArrayBuffer(
-                        res.prekeyBundle.signedPreKey.signature
+                        resBundle.signedPreKey.signature
                     ),
                 },
                 preKey: {
-                    keyId: res.prekeyBundle.preKey.keyId,
-                    publicKey: ensureArrayBuffer(
-                        res.prekeyBundle.preKey.publicKey
-                    ),
+                    keyId: resBundle.preKey.keyId,
+                    publicKey: ensureArrayBuffer(resBundle.preKey.publicKey),
                 },
-                registrationId: res.prekeyBundle.registrationId,
+                registrationId: resBundle.registrationId,
             };
 
             // 2. Create SignalProtocolAddress for the other user
@@ -205,6 +252,7 @@ export default function Messages() {
 
             // 4. Process prekey bundle to establish session
             const session = await sessionBuilder.processPreKey(bundle);
+            console.log("Session established:", session);
 
             const sessionCipher = new libsignal.SessionCipher(
                 adiStore,
@@ -213,67 +261,45 @@ export default function Messages() {
             const ciphertext = await sessionCipher.encrypt(
                 Uint8Array.from([0, 0, 0, 0]).buffer
             );
-            console.log("CIPHERTEXT" + res.prekeyBundle.deviceId + ciphertext);
-            initial_ciphertexts[res.prekeyBundle.deviceId] = ciphertext;
+
+            console.log("CIPHERTEXT" + resBundle.deviceId);
+            console.log(ciphertext);
+            // encode ciphertext body to base64 safely using helpers
+            ciphertext.body = arrayBufferToBase64(ensureArrayBuffer(ciphertext.body));
+            console.log(ciphertext);
+            initial_ciphertexts[resBundle.deviceId] = ciphertext;
         }
 
         // Post initial message
-        // const postReq = await fetch(
-        //     `http://localhost:8080/api/chat/${res.chat_id}/post`,
-        //     {
-        //         method: "POST",
-        //         headers: {
-        //             "Content-Type": "application/json",
-        //             "X-CSRF-Token": document.cookie
-        //                 .split("; ")
-        //                 .find((row) => row.startsWith("csrf-token"))
-        //                 .split("=")[1],
-        //         },
-        //         credentials: "include",
-        //         body: JSON.stringify({
-        //             content: initial_ciphertexts,
-        //         }),
-        //     }
-        // )
+        const postReq = await fetch(
+            `http://localhost:8080/api/chat/${res.chat_id}/post`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRF-Token": document.cookie
+                        .split("; ")
+                        .find((row) => row.startsWith("csrf-token"))
+                        .split("=")[1],
+                },
+                credentials: "include",
+                body: JSON.stringify({
+                    content: initial_ciphertexts,
+                    // header_data: {
+                    //     sender_dh_pubkey: arrayBufferToBase64(),
+                    // }
+                }),
+            }
+        );
 
-        // 1. Fetch prekey bundle of other user
-        // const bundle = {
-        //     identityKey: ensureArrayBuffer(res.prekeyBundle.identityKey),
-        //     signedPreKey: {
-        //         keyId: res.prekeyBundle.signedPreKey.keyId,
-        //         publicKey: ensureArrayBuffer(
-        //             res.prekeyBundle.signedPreKey.publicKey
-        //         ),
-        //         signature: ensureArrayBuffer(
-        //             res.prekeyBundle.signedPreKey.signature
-        //         ),
-        //     },
-        //     preKey: {
-        //         keyId: res.prekeyBundle.preKey.keyId,
-        //         publicKey: ensureArrayBuffer(res.prekeyBundle.preKey.publicKey),
-        //     },
-        //     registrationId: res.prekeyBundle.registrationId,
-        // };
-
-        // // 2. Create SignalProtocolAddress for the other user
-        // const address = new libsignal.SignalProtocolAddress(
-        //     res.userId.toString(),
-        //     res.prekeyBundle.deviceId
-        // );
-
-        // // 3. Create session builder
-        // const sessionBuilder = new libsignal.SessionBuilder(adiStore, address);
-
-        // // 4. Process prekey bundle to establish session
-        // const session = await sessionBuilder.processPreKey(bundle);
-
-        // const sessionCipher = new libsignal.SessionCipher(adiStore, address);
-        // const cipphertext = await sessionCipher.encrypt(
-        //     Uint8Array.from([0, 0, 0, 0]).buffer
-        // );
-
-        // TODO: implement per device message encryption. recheck prekey bundle deviceId
-
+        const postRes = await postReq.json();
+        if (postReq.status === 401) logout();
+        if (!postReq.ok) {
+            console.log("[ERROR] Could not post initial message");
+            console.log(postRes.error);
+            return;
+        }
+        
         // Redirect to new chat
         document.querySelector(".add-overlay").style.display = "none";
         return navigate("/app/msg/" + res.chat_id);
@@ -473,8 +499,12 @@ export default function Messages() {
         }
         const message = document.getElementById("message-input").value;
 
+        // ! SIGNAL PROTOCOL IMPLEMENTATION STARTS HERE
+        // Message sending flow (Diffie-Hellman ratchet)
+        // TODO: you left here. Implement message sending using established session (look at docs)
+
         const req = await fetch(
-            `http://localhost:8080/api/chat/${chatID}/message`,
+            `http://localhost:8080/api/chat/${chatID}/post`,
             {
                 method: "POST",
                 headers: {
@@ -486,7 +516,7 @@ export default function Messages() {
                 },
                 credentials: "include",
                 body: JSON.stringify({
-                    message: message,
+                    content: message,
                 }),
             }
         );
