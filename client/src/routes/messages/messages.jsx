@@ -14,6 +14,7 @@ import msgStore from "../../msgStore";
 import logout from "../../helpers/logout.helper";
 
 import * as libsignal from "@privacyresearch/libsignal-protocol-typescript";
+import openSocket from "./ws";
 
 function useAuth() {
     const navigate = useNavigate();
@@ -79,7 +80,8 @@ export default function Messages() {
                 const binary = atob(base64.replace(/\s+/g, ""));
                 const len = binary.length;
                 const bytes = new Uint8Array(len);
-                for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i) & 0xff;
+                for (let i = 0; i < len; i++)
+                    bytes[i] = binary.charCodeAt(i) & 0xff;
                 return bytes.buffer;
             } catch (e) {
                 // fall through to binary-string fallback
@@ -88,7 +90,8 @@ export default function Messages() {
 
         // Fallback: treat input as a binary string where each char code is a byte
         const u8 = new Uint8Array(base64.length);
-        for (let i = 0; i < base64.length; i++) u8[i] = base64.charCodeAt(i) & 0xff;
+        for (let i = 0; i < base64.length; i++)
+            u8[i] = base64.charCodeAt(i) & 0xff;
         return u8.buffer;
     }
 
@@ -216,8 +219,6 @@ export default function Messages() {
         // Store chat info locally
         msgStore.createChat(res.chat_id, username, res.recipientIds[0]);
 
-        console.log("Prekey Bundle received:", res.prekeyBundle);
-
         for (let i = 0; i < res.prekeyBundle[0].bundles.length; i++) {
             const resBundle = res.prekeyBundle[0].bundles[i];
             const bundle = {
@@ -238,11 +239,14 @@ export default function Messages() {
                 registrationId: resBundle.registrationId,
             };
 
+
             // 2. Create SignalProtocolAddress for the other user
             const address = new libsignal.SignalProtocolAddress(
-                res.userId.toString(),
-                res.prekeyBundle.deviceId
+                res.recipientIds[0].toString(),
+                resBundle.deviceId
             );
+
+            console.log("Address created:", address);
 
             // 3. Create session builder
             const sessionBuilder = new libsignal.SessionBuilder(
@@ -252,8 +256,8 @@ export default function Messages() {
 
             // 4. Process prekey bundle to establish session
             const session = await sessionBuilder.processPreKey(bundle);
-            console.log("Session established:", session);
 
+            // 5. Create session cipher
             const sessionCipher = new libsignal.SessionCipher(
                 adiStore,
                 address
@@ -265,9 +269,17 @@ export default function Messages() {
             console.log("CIPHERTEXT" + resBundle.deviceId);
             console.log(ciphertext);
             // encode ciphertext body to base64 safely using helpers
-            ciphertext.body = arrayBufferToBase64(ensureArrayBuffer(ciphertext.body));
+            ciphertext.body = arrayBufferToBase64(
+                ensureArrayBuffer(ciphertext.body)
+            );
             console.log(ciphertext);
             initial_ciphertexts[resBundle.deviceId] = ciphertext;
+
+            msgStore.addDeviceForChatUser(
+                res.chat_id,
+                res.recipientIds[0],
+                resBundle.deviceId
+            );
         }
 
         // Post initial message
@@ -299,7 +311,7 @@ export default function Messages() {
             console.log(postRes.error);
             return;
         }
-        
+
         // Redirect to new chat
         document.querySelector(".add-overlay").style.display = "none";
         return navigate("/app/msg/" + res.chat_id);
@@ -471,7 +483,8 @@ export default function Messages() {
         await friends();
         await pubKey();
         await chat();
-        await chatKey();
+        // await chatKey();
+        openSocket();
     };
 
     // Handle loading animation
@@ -501,7 +514,32 @@ export default function Messages() {
 
         // ! SIGNAL PROTOCOL IMPLEMENTATION STARTS HERE
         // Message sending flow (Diffie-Hellman ratchet)
-        // TODO: you left here. Implement message sending using established session (look at docs)
+        // Set up encryption
+        const users = msgStore.getAllDeviceIdsForChat(chatID); // { userId: [deviceIds] }
+        console.log(users);
+        const buffer = new TextEncoder().encode(message).buffer;
+        let ciphertexts = {}; // deviceId: ciphertext
+        for (let i = 0; i < Object.keys(users).length; i++) {
+            for (let j = 0; j < users[Object.keys(users)[i]].length; j++) {
+                const currentUser = Object.keys(users)[i];
+                const address = new libsignal.SignalProtocolAddress(
+                    currentUser.toString(),
+                    users[currentUser][j]
+                );
+                const sessionCipher = new libsignal.SessionCipher(
+                    adiStore,
+                    address
+                ); // TODO: creates only prekeywhisper messages at the moment. why?
+                const ciphertext = await sessionCipher.encrypt(buffer);
+                console.log("CIPHERTEXT" + users[currentUser][j]);
+                console.log(ciphertext);
+                ciphertexts[users[currentUser][j]] = ciphertext;
+                // encode ciphertext body to base64 safely using helpers
+                ciphertext.body = arrayBufferToBase64(
+                    ensureArrayBuffer(ciphertext.body)
+                );
+            }
+        }
 
         const req = await fetch(
             `http://localhost:8080/api/chat/${chatID}/post`,
@@ -516,7 +554,7 @@ export default function Messages() {
                 },
                 credentials: "include",
                 body: JSON.stringify({
-                    content: message,
+                    content: ciphertexts,
                 }),
             }
         );
@@ -763,7 +801,7 @@ export default function Messages() {
                             narrow
                         />
                         <Input label="Message" id="message-input" textarea />
-                        <Button text="Send" id="send-btn" />
+                        <Button text="Send" id="send-btn" onClick={postMessage}/>
                     </section>
                 </article>
                 <aside className="users">

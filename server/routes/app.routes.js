@@ -9,9 +9,11 @@ import {
     checkIfUsersAreFriends,
     fetchPrekeyBundle,
     checkIfChatExists,
+    getAllActiveDevicesForUser,
 } from "../helpers/app.helpers.js";
 
 import { checkIfUserExists as checkIfUserExistsByEmail } from "../helpers/auth.helpers.js";
+import { sendToDevice } from "./messages.ws.js";
 
 const changeStatus = async (req, res, next) => {
     // Check if user is logged in
@@ -511,6 +513,17 @@ const postMessage = async (req, res, next) => {
             // req.body.header_data,
         ]
     );
+
+    // Send message to active WebSocket connections
+    const deviceIds = getAllActiveDevicesForUser(req.session.userID);
+    deviceIds.forEach((deviceId) => {
+        sendToDevice(req.session.userID, deviceId, {
+            type: "new_message",
+            chat_id: req.params.chat_id,
+            sender_id: req.session.userID,
+            ciphertext: req.body.content[deviceId],
+        });
+    });
 
     res.status(201).send({
         csrfToken: csrf,

@@ -1,14 +1,19 @@
-import 'dotenv/config';
-import session from 'express-session';
-import { pool } from './db/db.connect.js';
-import crypto from 'crypto';
-import cookieParser from 'cookie-parser';
-import connectPgSimple from 'connect-pg-simple';
+import "dotenv/config";
+import session from "express-session";
+import { pool } from "./db/db.connect.js";
+import crypto from "crypto";
+import cookieParser from "cookie-parser";
+import connectPgSimple from "connect-pg-simple";
 
-import express from 'express';
+import { WebSocketServer } from "ws";
+import http from "http";
+
+// Attach websocket handlers after creating wss (avoid circular imports)
+import { attachWss } from "./routes/messages.ws.js";
+
+import express from "express";
 const app = express();
-const FALLBACK_PORT = 3001;
-
+const FALLBACK_PORT = 8080;
 
 // For POST routes
 app.use(express.json());
@@ -17,35 +22,119 @@ app.use(express.urlencoded({ extended: true }));
 // Allows cookie use
 app.use(cookieParser());
 
-// Session setup
-app.use(session({
-    secret: crypto.randomBytes(64).toString('hex'),
+// Session setup - create a reusable session parser for HTTP and WebSocket upgrades
+const sessionParser = session({
+    secret: process.env.SESSION_SECRET || "dev-secret-please-set-in-env",
     resave: false,
-    saveUninitialized: true,
-    cookie: { secure: 'auto' },
-    store: new (connectPgSimple(session))({
-        pool: pool
-    })
-}));
+    saveUninitialized: false,
+    cookie: {
+        secure: process.env.NODE_ENV === "production",
+        httpOnly: true,
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+    },
+    store: new (connectPgSimple(session))({ pool: pool }),
+});
+
+app.use(sessionParser);
 
 // CORS
 app.use((req, res, next) => {
-    res.set("Access-Control-Allow-Origin", "http://localhost:3000");
+    const allowed = process.env.ALLOWED_ORIGINS || "http://localhost:3000";
+    res.set("Access-Control-Allow-Origin", allowed);
     res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
-    res.set("Access-Control-Allow-Headers", "Content-Type, X-CSRF-Token, Accept, Authorization");   
+    res.set(
+        "Access-Control-Allow-Headers",
+        "Content-Type, X-CSRF-Token, Accept, Authorization"
+    );
     res.set("Access-Control-Allow-Credentials", "true");
     next();
 });
 
-
 // Routes
-import router from './handlers/auth.handlers.js';
-app.use('/auth', router);
+import router from "./handlers/auth.handlers.js";
+app.use("/auth", router);
 
-import appRouter from './handlers/app.handlers.js'
-app.use('/api', appRouter);
+import appRouter from "./handlers/app.handlers.js";
+app.use("/api", appRouter);
 
+// WebSocket server setup
+const server = http.createServer(app);
+const wss = new WebSocketServer({ noServer: true });
+// TODO NEXT: you left here. fix websocket connection (it is not connectiong -- client says fail)
+
+// Allowed origins for upgrades (comma-separated env var)
+const allowedOrigins = (
+    process.env.ALLOWED_ORIGINS || "http://localhost:3000"
+).split(",");
+
+server.on("upgrade", (req, socket, head) => {
+    const origin = req.headers.origin;
+    // Diagnostic log: show incoming upgrade attempt metadata
+    console.log("WS upgrade attempt:", {
+        url: req.url,
+        origin,
+        cookie: req.headers.cookie,
+    });
+    // Only accept upgrades for the messages websocket path
+    // If your client connects to a different path, it will never trigger this handler
+    if (!req.url || !req.url.startsWith('/ws/messages')) {
+        console.warn('WS upgrade rejected: unexpected path', { url: req.url });
+        socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+        socket.destroy();
+        return;
+    }
+    if (origin && !allowedOrigins.includes(origin)) {
+        console.warn("WS upgrade rejected: origin not allowed", { origin });
+        socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+        socket.destroy();
+        return;
+    }
+
+    // Parse session using the same parser used by Express
+    sessionParser(req, {}, () => {
+        if (!req.session || !req.session.userId) {
+            console.warn("WS upgrade rejected: no valid session on request", {
+                cookie: req.headers.cookie,
+                session: req.session,
+            });
+            socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+            socket.destroy();
+            return;
+        }
+
+        wss.handleUpgrade(req, socket, head, (ws) => {
+            // Attach session information to the ws for later use
+            ws.session = req.session;
+            ws.userId = req.session.userId;
+            ws.deviceId = req.session.deviceId;
+            ws.isAlive = true;
+            wss.emit("connection", ws, req);
+        });
+    });
+});
+
+// Register ws handlers for messages
+attachWss(wss);
+
+// Heartbeat to detect dead connections
+const HEARTBEAT_INTERVAL = 30_000; // 30s
+setInterval(() => {
+    wss.clients.forEach((ws) => {
+        if (ws.isAlive === false) return ws.terminate();
+        ws.isAlive = false;
+        try {
+            ws.ping();
+        } catch (e) {
+            // ignore ping errors
+        }
+    });
+}, HEARTBEAT_INTERVAL);
+
+export default wss;
 
 app.listen(process.env.PORT || FALLBACK_PORT, () => {
-    console.log(`Server is running on port ${process.env.PORT || FALLBACK_PORT}`);
-})
+    console.log(
+        `Server is running on port ${process.env.PORT || FALLBACK_PORT}`
+    );
+});

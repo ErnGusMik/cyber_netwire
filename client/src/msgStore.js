@@ -164,6 +164,7 @@ const store = {
         }
     },
 
+    
     // Update last message info (text and timestamp)
     updateLastMessage: function (chatId, messageText, timestamp = Date.now()) {
         const chat = this.getChat(chatId);
@@ -227,6 +228,96 @@ const store = {
             }
         }
         return unread;
+    },
+
+    // Devices - per chat + user device id storage utilities
+
+    // Add a single deviceId for a given chat and user (id stored as string)
+    // Equivalent to: add one by one with user id and chat id
+    addDeviceForChatUser: function (chatId, userId, deviceId) {
+        if (!chatId || !userId || deviceId === undefined || deviceId === null) return;
+        const key = `chatDevice:${chatId}:${userId}`;
+        const existing = this.get(key) || [];
+        const strId = String(deviceId);
+        if (!existing.some((d) => String(d) === strId)) {
+            existing.push(strId);
+            this.put(key, existing, STORE_CHATS);
+        }
+    },
+
+    // Get all deviceIds in a chat for a specific user
+    getDeviceIdsForChatUser: function (chatId, userId) {
+        if (!chatId || !userId) return [];
+        const key = `chatDevice:${chatId}:${userId}`;
+        return this.get(key) || [];
+    },
+
+    // Remove a deviceId for a given chat and user
+    removeDeviceForChatUser: function (chatId, userId, deviceId) {
+        if (!chatId || !userId || deviceId === undefined || deviceId === null) return;
+        const key = `chatDevice:${chatId}:${userId}`;
+        const existing = this.get(key) || [];
+        const strId = String(deviceId);
+        const filtered = existing.filter((d) => String(d) !== strId);
+        if (filtered.length === 0) this.remove(key, STORE_CHATS);
+        else this.put(key, filtered, STORE_CHATS);
+    },
+
+    // Remove device by id across chat (if you only have chatId+deviceId and want to remove for all users)
+    // Not strictly required but provided for convenience
+    removeDeviceFromChat: function (chatId, deviceId) {
+        if (!chatId || deviceId === undefined || deviceId === null) return;
+        const prefix = `chatDevice:${chatId}:`;
+        const strId = String(deviceId);
+        for (const [k, v] of this._map) {
+            const keyStr = String(k);
+            if (keyStr.startsWith(prefix) || keyStr.startsWith(`chats:${prefix}`)) {
+                const existing = this.get(k) || [];
+                const filtered = existing.filter((d) => String(d) !== strId);
+                if (filtered.length === 0) this.remove(k, STORE_CHATS);
+                else this.put(k, filtered, STORE_CHATS);
+            }
+        }
+    },
+
+    // Get a mapping of userId -> [deviceId,...] for all users in a chat
+    getAllDeviceIdsForChat: function (chatId) {
+        const result = {};
+        if (!chatId) return result;
+        const prefix = `chatDevice:${chatId}:`;
+        const altPrefix = `chats:${prefix}`;
+        for (const [k, v] of this._map) {
+            const keyStr = String(k);
+            if (keyStr.startsWith(prefix)) {
+                const userId = keyStr.slice(prefix.length);
+                result[userId] = Array.isArray(v) ? v.slice() : [];
+            } else if (keyStr.startsWith(altPrefix)) {
+                const userId = keyStr.slice(altPrefix.length);
+                result[userId] = Array.isArray(v) ? v.slice() : [];
+            }
+        }
+        return result;
+    },
+
+    // Get device list for a chat as an array of { userId, deviceIds }
+    // This is useful when callers expect an indexed array and want to access
+    // `result[i].userId` and `result[i].deviceIds`.
+    getDeviceListForChat: function (chatId) {
+        const list = [];
+        if (!chatId) return list;
+        const prefix = `chatDevice:${chatId}:`;
+        const altPrefix = `chats:${prefix}`;
+        for (const [k, v] of this._map) {
+            const keyStr = String(k);
+            if (keyStr.startsWith(prefix)) {
+                const userId = keyStr.slice(prefix.length);
+                list.push({ userId, deviceIds: Array.isArray(v) ? v.slice() : [] });
+            } else if (keyStr.startsWith(altPrefix)) {
+                const userId = keyStr.slice(altPrefix.length);
+                list.push({ userId, deviceIds: Array.isArray(v) ? v.slice() : [] });
+            }
+        }
+        return list;
     },
 
     // MESSAGES - store a new message

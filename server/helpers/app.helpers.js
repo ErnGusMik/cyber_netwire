@@ -135,6 +135,7 @@ const fetchPrekeyBundle = async (userId) => {
                 signature: arrayBufferToBase64Node(device.spk_signature), // ArrayBuffer
             },
             preKey: {},
+            deviceId: device.device_id,
         };
         const prekeyRes = await query(
             "SELECT * FROM opk_keys WHERE user_id = $1 AND is_used = false AND device_id = $2 ORDER BY key_id ASC LIMIT 1",
@@ -189,11 +190,20 @@ const checkIfChatExists = async (chatId) => {
     return chat;
 };
 
+const getAllActiveDevicesForUser = async (userId) => {
+    const devices = await query(
+        "SELECT device_id FROM device_keys WHERE user_id = $1",
+        [userId]
+    );
+    return devices.rows.map((row) => row.device_id);
+};
+
 export {
     checkIfUserExists,
     checkIfUsersAreFriends,
     sendKey,
     getUserFromDisplayName,
     fetchPrekeyBundle,
-    checkIfChatExists
+    checkIfChatExists,
+    getAllActiveDevicesForUser,
 };
