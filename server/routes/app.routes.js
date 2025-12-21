@@ -10,6 +10,7 @@ import {
     fetchPrekeyBundle,
     checkIfChatExists,
     getAllActiveDevicesForUser,
+    getAllChatMembers,
 } from "../helpers/app.helpers.js";
 
 import { checkIfUserExists as checkIfUserExistsByEmail } from "../helpers/auth.helpers.js";
@@ -186,6 +187,9 @@ const newChat = async (req, res, next) => {
             req.body.members[i].display_name,
             req.body.members[i].user_no
         );
+        if (!user || user.rowCount === 0) {
+            continue;
+        }
         await query(
             "INSERT INTO chat_members (chat_id, user_id, joined_at) VALUES ($1, $2, $3)",
             [chat.rows[0].id, user.rows[0].id, new Date().toUTCString()]
@@ -398,6 +402,37 @@ const getChatMessages = async (req, res, next) => {
     });
 };
 
+const getChatDevices = async (req, res, next) => {
+    // Check if user is logged in
+    if (!req.session.email || req.session.loggedIn !== true) {
+        res.status(401).send({
+            error: "Invalid session. Have you logged in?",
+        });
+        return;
+    }
+
+    // Get chat devices
+    const devices = await query(
+        `SELECT
+            cd.device_id,
+            u.display_name,
+            u.id
+        FROM
+            chat_members cm
+        INNER JOIN
+            device_keys cd ON cm.user_id = cd.user_id
+        JOIN
+            "user" u ON cm.user_id = u.id
+        WHERE
+            cm.chat_id = $1;`,
+        [req.params.chat_id]
+    );
+
+    res.status(200).send({
+        devices: devices.rows,
+    });
+};
+
 const getChatKey = async (req, res, next) => {
     // Check if user is logged in
     if (!req.session.email || req.session.loggedIn !== true) {
@@ -514,16 +549,25 @@ const postMessage = async (req, res, next) => {
         ]
     );
 
-    // Send message to active WebSocket connections
-    const deviceIds = getAllActiveDevicesForUser(req.session.userID);
-    deviceIds.forEach((deviceId) => {
-        sendToDevice(req.session.userID, deviceId, {
-            type: "new_message",
-            chat_id: req.params.chat_id,
-            sender_id: req.session.userID,
-            ciphertext: req.body.content[deviceId],
+    const members = await getAllChatMembers(req.params.chat_id);
+
+    for (let i = 0; i < members.length; i++) {
+        if (members[i] === req.session.userID) {
+            continue;
+        }
+        const deviceIds = await getAllActiveDevicesForUser(
+            members[i]
+        );
+        deviceIds.forEach((deviceId) => {
+            const sent = sendToDevice(members[i], deviceId, {
+                type: "new_message",
+                chat_id: req.params.chat_id,
+                sender_id: req.session.userID + ":" + req.session.deviceId,
+                ciphertext: req.body.content[deviceId],
+            });
+            console.log(sent);
         });
-    });
+    }
 
     res.status(201).send({
         csrfToken: csrf,
@@ -540,4 +584,5 @@ export {
     getChatMessages,
     postMessage,
     getChatKey,
+    getChatDevices
 };

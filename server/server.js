@@ -1,7 +1,6 @@
 import "dotenv/config";
 import session from "express-session";
 import { pool } from "./db/db.connect.js";
-import crypto from "crypto";
 import cookieParser from "cookie-parser";
 import connectPgSimple from "connect-pg-simple";
 
@@ -61,7 +60,6 @@ app.use("/api", appRouter);
 // WebSocket server setup
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
-// TODO NEXT: you left here. fix websocket connection (it is not connectiong -- client says fail)
 
 // Allowed origins for upgrades (comma-separated env var)
 const allowedOrigins = (
@@ -70,12 +68,7 @@ const allowedOrigins = (
 
 server.on("upgrade", (req, socket, head) => {
     const origin = req.headers.origin;
-    // Diagnostic log: show incoming upgrade attempt metadata
-    console.log("WS upgrade attempt:", {
-        url: req.url,
-        origin,
-        cookie: req.headers.cookie,
-    });
+
     // Only accept upgrades for the messages websocket path
     // If your client connects to a different path, it will never trigger this handler
     if (!req.url || !req.url.startsWith('/ws/messages')) {
@@ -93,7 +86,7 @@ server.on("upgrade", (req, socket, head) => {
 
     // Parse session using the same parser used by Express
     sessionParser(req, {}, () => {
-        if (!req.session || !req.session.userId) {
+        if (!req.session || !req.session.userID) {
             console.warn("WS upgrade rejected: no valid session on request", {
                 cookie: req.headers.cookie,
                 session: req.session,
@@ -106,8 +99,8 @@ server.on("upgrade", (req, socket, head) => {
         wss.handleUpgrade(req, socket, head, (ws) => {
             // Attach session information to the ws for later use
             ws.session = req.session;
-            ws.userId = req.session.userId;
-            ws.deviceId = req.session.deviceId;
+            ws.userID = req.session.userID;
+            ws.deviceID = req.session.deviceId;
             ws.isAlive = true;
             wss.emit("connection", ws, req);
         });
@@ -133,7 +126,7 @@ setInterval(() => {
 
 export default wss;
 
-app.listen(process.env.PORT || FALLBACK_PORT, () => {
+server.listen(process.env.PORT || FALLBACK_PORT, () => {
     console.log(
         `Server is running on port ${process.env.PORT || FALLBACK_PORT}`
     );

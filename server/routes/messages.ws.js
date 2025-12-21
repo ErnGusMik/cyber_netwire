@@ -6,8 +6,9 @@ const activeConnections = new Map();
 function attachWss(wss) {
     if (!wss || typeof wss.on !== 'function') throw new Error('attachWss requires a WebSocketServer');
 
+
     wss.on('connection', (ws, req) => {
-        const userId = req.session?.userId;
+        const userId = req.session?.userID;
         const deviceId = req.session?.deviceId;
         if (!userId || !deviceId) {
             ws.close(1008, 'Unauthorized');
@@ -56,6 +57,7 @@ function attachWss(wss) {
 function sendToDevice(userId, deviceId, payload) {
     const key = `${userId}:${deviceId}`;
     const conn = activeConnections.get(key);
+    console.log('sendToDevice', { key });
     if (!conn) return false;
     if (conn.readyState !== 1) {
         // not OPEN

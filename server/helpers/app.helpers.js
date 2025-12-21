@@ -14,22 +14,33 @@ function arrayBufferToBase64Node(ab) {
 
 // convert various incoming formats into Node Buffer
 const toBuffer = (pub) => {
+    if (!pub) throw new TypeError("Input is null or undefined");
     if (Buffer.isBuffer(pub)) return pub;
+
+    // Handle Strings - Assume Base64 (Standard for Signal)
     if (typeof pub === "string") {
-        const s = pub.trim();
-        // detect hex (only hex chars, even length)
-        if (/^[0-9a-fA-F]+$/.test(s) && s.length % 2 === 0)
-            return Buffer.from(s, "hex");
-        // otherwise assume base64
-        return Buffer.from(s, "base64");
+        return Buffer.from(pub.trim(), "base64");
     }
-    if (pub instanceof ArrayBuffer) return Buffer.from(new Uint8Array(pub));
-    if (pub instanceof Uint8Array) return Buffer.from(pub);
-    if (Array.isArray(pub)) return Buffer.from(pub);
-    // object shape like { data: [...] }
-    if (pub && typeof pub === "object" && Array.isArray(pub.data))
+
+    // Handle Uint8Array / TypedArrays (Crucial for Signal)
+    if (ArrayBuffer.isView(pub)) {
+        // Buffer.from(view.buffer, offset, length) is the most precise way
+        return Buffer.from(pub.buffer, pub.byteOffset, pub.byteLength);
+    }
+
+    // Handle raw ArrayBuffer
+    if (pub instanceof ArrayBuffer) {
+        return Buffer.from(pub);
+    }
+
+    // Handle { data: [1, 2, 3] } - Result of JSON.stringify(Buffer)
+    if (pub && typeof pub === "object" && Array.isArray(pub.data)) {
         return Buffer.from(pub.data);
-    throw new TypeError("Unsupported publicKey format");
+    }
+
+    if (Array.isArray(pub)) return Buffer.from(pub);
+
+    throw new TypeError("Unsupported format for conversion to Buffer");
 };
 
 const checkIfUserExists = async (displayName, userNo) => {
@@ -198,6 +209,14 @@ const getAllActiveDevicesForUser = async (userId) => {
     return devices.rows.map((row) => row.device_id);
 };
 
+const getAllChatMembers = async (chatId) => {
+    const members = await query(
+        "SELECT user_id FROM chat_members WHERE chat_id = $1",
+        [chatId]
+    );
+    return members.rows.map((row) => row.user_id);
+}
+
 export {
     checkIfUserExists,
     checkIfUsersAreFriends,
@@ -206,4 +225,7 @@ export {
     fetchPrekeyBundle,
     checkIfChatExists,
     getAllActiveDevicesForUser,
+    getAllChatMembers,
+    toBuffer,
+    buf2hex,
 };

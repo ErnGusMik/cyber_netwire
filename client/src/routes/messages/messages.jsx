@@ -76,15 +76,49 @@ export default function Messages() {
 
         // If it looks like base64, decode using atob
         if (isBase64String(base64)) {
+            // try {
+            //     const binary = atob(base64.replace(/\s+/g, ""));
+            //     const len = binary.length;
+            //     const bytes = new Uint8Array(len);
+            //     for (let i = 0; i < len; i++)
+            //         bytes[i] = binary.charCodeAt(i) & 0xff;
+            //     return bytes.buffer;
+            // } catch (e) {
+            //     // fall through to binary-string fallback
+            // }
+            if (!base64) return null;
+            if (base64 instanceof ArrayBuffer) return base64;
+
+            if (ArrayBuffer.isView(base64)) {
+                return base64.buffer.slice(
+                    base64.byteOffset,
+                    base64.byteOffset + base64.byteLength
+                );
+            }
+
+            if (typeof base64 !== "string") {
+                return new Uint8Array(base64).buffer;
+            }
+
             try {
-                const binary = atob(base64.replace(/\s+/g, ""));
+                // Remove whitespace which can be introduced by DBs or JSON formatting
+                const sanitized = base64.replace(/\s+/g, "");
+                const binary = atob(sanitized);
                 const len = binary.length;
                 const bytes = new Uint8Array(len);
-                for (let i = 0; i < len; i++)
+
+                for (let i = 0; i < len; i++) {
+                    // & 0xff ensures we strictly keep the 8-bit byte value
                     bytes[i] = binary.charCodeAt(i) & 0xff;
+                }
+
                 return bytes.buffer;
             } catch (e) {
-                // fall through to binary-string fallback
+                console.error(
+                    "base64ToArrayBuffer: Failed to decode string.",
+                    e
+                );
+                return null;
             }
         }
 
@@ -109,10 +143,23 @@ export default function Messages() {
 
     // Browser: arrayBuffer -> base64 (chunked to avoid stack issues)
     function arrayBufferToBase64(arrayBuffer) {
-        const bytes = new Uint8Array(arrayBuffer);
-        const chunkSize = 0x8000;
+        let bytes;
+        if (ArrayBuffer.isView(arrayBuffer)) {
+            // Use the specific slice defined by the view
+            bytes = new Uint8Array(
+                arrayBuffer.buffer,
+                arrayBuffer.byteOffset,
+                arrayBuffer.byteLength
+            );
+        } else {
+            bytes = new Uint8Array(arrayBuffer);
+        }
+
+        const chunkSize = 0x8000; // 32KB chunks
         let binary = "";
+
         for (let i = 0; i < bytes.length; i += chunkSize) {
+            // Chunking prevents "Maximum call stack size exceeded"
             binary += String.fromCharCode.apply(
                 null,
                 bytes.subarray(i, i + chunkSize)
@@ -239,7 +286,6 @@ export default function Messages() {
                 registrationId: resBundle.registrationId,
             };
 
-
             // 2. Create SignalProtocolAddress for the other user
             const address = new libsignal.SignalProtocolAddress(
                 res.recipientIds[0].toString(),
@@ -268,10 +314,9 @@ export default function Messages() {
 
             console.log("CIPHERTEXT" + resBundle.deviceId);
             console.log(ciphertext);
+            console.log(ciphertext.body);
             // encode ciphertext body to base64 safely using helpers
-            ciphertext.body = arrayBufferToBase64(
-                ensureArrayBuffer(ciphertext.body)
-            );
+            ciphertext.body = btoa(ciphertext.body);
             console.log(ciphertext);
             initial_ciphertexts[resBundle.deviceId] = ciphertext;
 
@@ -367,6 +412,16 @@ export default function Messages() {
             const res = await req.json();
             console.log(res.chats);
             setChats(res.chats);
+
+            for (let i = 0; i < res.chats.length; i++) {
+                msgStore.createChat(
+                    res.chats[i].chat_id,
+                    res.chats[i].chat_type == 0
+                        ? res.chats[i].other_user_name
+                        : res.chats[i].chat_name,
+                    res.chats[i].other_user_id
+                );
+            }
         };
 
         // Fetch friends
@@ -413,6 +468,38 @@ export default function Messages() {
         const chat = async () => {
             console.log(chatID);
             if (chatID) {
+                const deviceReq = await fetch(
+                    `http://localhost:8080/api/chat/${chatID}/devices`,
+                    {
+                        method: "GET",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        credentials: "include",
+                    }
+                );
+
+                const deviceRes = await deviceReq.json();
+                console.log(deviceRes);
+
+                if (!deviceReq.ok) {
+                    if (deviceReq.status === 401) {
+                        localStorage.removeItem("isAuthenticated");
+                        navigate("/auth?redirect=app/msg/");
+                    }
+                    console.log("[ERROR] Could not fetch chat devices");
+                    console.log(deviceRes.error);
+                    return;
+                }
+
+                for (let i = 0; i < deviceRes.devices.length; i++) {
+                    msgStore.addDeviceForChatUser(
+                        chatID,
+                        deviceRes.devices[i].id,
+                        deviceRes.devices[i].device_id
+                    );
+                }
+
                 const req = await fetch(
                     `http://localhost:8080/api/chat/${chatID}/messages/15`,
                     {
@@ -484,7 +571,7 @@ export default function Messages() {
         await pubKey();
         await chat();
         // await chatKey();
-        openSocket();
+        openSocket(receiveMessage);
     };
 
     // Handle loading animation
@@ -516,8 +603,13 @@ export default function Messages() {
         // Message sending flow (Diffie-Hellman ratchet)
         // Set up encryption
         const users = msgStore.getAllDeviceIdsForChat(chatID); // { userId: [deviceIds] }
+        if (!users || Object.keys(users).length === 0) {
+            console.log("[ERROR] No users/devices found for chat");
+            return;
+        }
         console.log(users);
         const buffer = new TextEncoder().encode(message).buffer;
+        console.log("LENGTH:", buffer.byteLength);
         let ciphertexts = {}; // deviceId: ciphertext
         for (let i = 0; i < Object.keys(users).length; i++) {
             for (let j = 0; j < users[Object.keys(users)[i]].length; j++) {
@@ -566,6 +658,48 @@ export default function Messages() {
 
         const res = await req.json();
         console.log(res);
+    };
+
+    const receiveMessage = async (
+        message,
+        msgChatId,
+        senderId,
+        senderDeviceId
+    ) => {
+        console.log("Received message for chat " + msgChatId);
+        console.log(message);
+
+        const address = new libsignal.SignalProtocolAddress(
+            senderId.toString(),
+            senderDeviceId
+        );
+        const sessionCipher = new libsignal.SessionCipher(adiStore, address);
+
+        let plaintext;
+        if (message.type === 3) {
+
+            // TODO: you left here. decryption shows Error: Badd MAC. fix it. base64 encoding matches when sent and received. bad encoding?
+            try {
+                const binaryText = ensureArrayBuffer(message.body);
+                console.log("PreKey MESSAGE LENGTH:", binaryText.byteLength);
+                console.log("LENGTH:", binaryText);
+                plaintext = await sessionCipher.decryptPreKeyWhisperMessage(
+                    binaryText,
+                    "binary"
+                );
+            } catch (e) {
+                console.log("PreKey decryption error:", e);
+            }
+        } else if (message.type === 1) {
+            try {
+                plaintext = await sessionCipher.decryptWhisperMessage(
+                    ensureArrayBuffer(message.body),
+                    "binary"
+                );
+            } catch (e) {
+                console.log("Whisper decryption error:", e);
+            }
+        }
     };
 
     // Check if user is authenticated
@@ -723,7 +857,14 @@ export default function Messages() {
                                 Encrypted. Fingerprint:
                                 {pubKey}
                             </p>
-                            <h1 className="chat-name"># Watson</h1>
+                            <h1 className="chat-name">
+                                #{" "}
+                                {
+                                    chats.find(
+                                        (chat) => chat.chat_id === chatID
+                                    )?.other_user_name
+                                }
+                            </h1>
                         </div>
                         <div className="btns">
                             <div className="btn active">
@@ -801,7 +942,11 @@ export default function Messages() {
                             narrow
                         />
                         <Input label="Message" id="message-input" textarea />
-                        <Button text="Send" id="send-btn" onClick={postMessage}/>
+                        <Button
+                            text="Send"
+                            id="send-btn"
+                            onClick={postMessage}
+                        />
                     </section>
                 </article>
                 <aside className="users">
