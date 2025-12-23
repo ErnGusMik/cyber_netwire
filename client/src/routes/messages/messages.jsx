@@ -285,6 +285,7 @@ export default function Messages() {
                 },
                 registrationId: resBundle.registrationId,
             };
+            console.log("Bundle received:", bundle);
 
             // 2. Create SignalProtocolAddress for the other user
             const address = new libsignal.SignalProtocolAddress(
@@ -314,11 +315,15 @@ export default function Messages() {
 
             console.log("CIPHERTEXT" + resBundle.deviceId);
             console.log(ciphertext);
-            console.log(ciphertext.body);
+            console.log("BINARY LEN", ciphertext.body.byteLength);
             // encode ciphertext body to base64 safely using helpers
-            ciphertext.body = btoa(ciphertext.body);
-            console.log(ciphertext);
-            initial_ciphertexts[resBundle.deviceId] = ciphertext;
+            const base64Body = arrayBufferToBase64(ensureArrayBuffer(ciphertext.body));
+            console.log("ENCODED CIPHERTEXT LENGTH: " + base64Body.length);
+            initial_ciphertexts[resBundle.deviceId] = {
+                type: ciphertext.type,
+                body: base64Body,
+                registrationId: ciphertext.registrationId
+            };
 
             msgStore.addDeviceForChatUser(
                 res.chat_id,
@@ -621,15 +626,19 @@ export default function Messages() {
                 const sessionCipher = new libsignal.SessionCipher(
                     adiStore,
                     address
-                ); // TODO: creates only prekeywhisper messages at the moment. why?
+                );
                 const ciphertext = await sessionCipher.encrypt(buffer);
                 console.log("CIPHERTEXT" + users[currentUser][j]);
                 console.log(ciphertext);
-                ciphertexts[users[currentUser][j]] = ciphertext;
                 // encode ciphertext body to base64 safely using helpers
-                ciphertext.body = arrayBufferToBase64(
+                const base64Body = arrayBufferToBase64(
                     ensureArrayBuffer(ciphertext.body)
                 );
+                ciphertexts[users[currentUser][j]] = {
+                    type: ciphertext.type,
+                    body: base64Body,
+                    registrationId: ciphertext.registrationId
+                };
             }
         }
 
@@ -673,16 +682,56 @@ export default function Messages() {
             senderId.toString(),
             senderDeviceId
         );
+        
+        // Check if session exists
+        console.log("=== DECRYPTION DEBUG ===");
+        console.log("Sender address:", senderId, "Device:", senderDeviceId);
+        console.log("Message type:", message.type);
+        
+        const hasSession = await adiStore.loadSession(address.toString());
+        const dump = await adiStore.dump();
+        console.log("ADI Store dump:", dump);
+        console.log("Session exists:", !!hasSession);
+        if (hasSession) {
+            console.log("Session record found");
+        } else {
+            console.log("WARNING: No session found for this address!");
+        }
+        console.log('IDENT ', await adiStore.getIdentityKeyPair());
+        
         const sessionCipher = new libsignal.SessionCipher(adiStore, address);
 
         let plaintext;
         if (message.type === 3) {
-
-            // TODO: you left here. decryption shows Error: Badd MAC. fix it. base64 encoding matches when sent and received. bad encoding?
             try {
                 const binaryText = ensureArrayBuffer(message.body);
                 console.log("PreKey MESSAGE LENGTH:", binaryText.byteLength);
-                console.log("LENGTH:", binaryText);
+                console.log("First 10 bytes:", new Uint8Array(binaryText).slice(0, 10));
+                // function ArrayBufferToString(buffer) {
+                //     return BinaryToString(
+                //         String.fromCharCode.apply(
+                //             null,
+                //             Array.prototype.slice.apply(new Uint8Array(buffer))
+                //         )
+                //     );
+                // }
+
+                // function BinaryToString(binary) {
+                //     var error;
+                //     try {
+                //         return decodeURIComponent(escape(binary));
+                //     } catch (_error) {
+                //         error = _error;
+                //         if (error instanceof URIError) {
+                //             return binary;
+                //         } else {
+                //             throw error;
+                //         }
+                //     }
+                // }
+                // const binaryStr = ArrayBufferToString(binaryText);
+                // console.log("BINARY STR LENGTH:", binaryStr.length);
+                // console.log("BINARY STR:", binaryStr);
                 plaintext = await sessionCipher.decryptPreKeyWhisperMessage(
                     binaryText,
                     "binary"
