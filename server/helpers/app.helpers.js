@@ -146,7 +146,7 @@ const fetchPrekeyBundle = async (userId) => {
                 signature: arrayBufferToBase64Node(device.spk_signature), // ArrayBuffer
             },
             preKey: {},
-            deviceId: device.device_id,
+            //deviceId: device.device_id,
         };
         const prekeyRes = await query(
             "SELECT * FROM opk_keys WHERE user_id = $1 AND is_used = false AND device_id = $2 ORDER BY key_id ASC LIMIT 1",
@@ -160,12 +160,12 @@ const fetchPrekeyBundle = async (userId) => {
                     prekeyRes.rows[0].public_key
                 ), // ArrayBuffer
             };
-        }
 
-        await query(
-            "UPDATE opk_keys SET is_used = true WHERE user_id = $1 AND key_id = $2",
-            [userId, bundle.preKey.keyId]
-        );
+            await query(
+                "UPDATE opk_keys SET is_used = true WHERE user_id = $1 AND key_id = $2 AND device_id = $3",
+                [userId, bundle.preKey.keyId, device.device_id]
+            );
+        }
         allBundles.push(bundle);
     }
 

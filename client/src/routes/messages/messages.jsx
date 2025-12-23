@@ -44,7 +44,12 @@ export default function Messages() {
     const [more, setMore] = React.useState(false);
     const [newChatError, setNewChatError] = React.useState("");
     const [chatKey, setChatKey] = React.useState();
+    const [userId, setUserId] = React.useState(0);
     const { chatID } = useParams();
+
+    const [messages, setMessages] = React.useState(
+        msgStore.getMessagesByChatId(chatID) || []
+    );
 
     // Crypto helper function
     function hexToUint8Array(hexString) {
@@ -317,12 +322,14 @@ export default function Messages() {
             console.log(ciphertext);
             console.log("BINARY LEN", ciphertext.body.byteLength);
             // encode ciphertext body to base64 safely using helpers
-            const base64Body = arrayBufferToBase64(ensureArrayBuffer(ciphertext.body));
+            const base64Body = arrayBufferToBase64(
+                ensureArrayBuffer(ciphertext.body)
+            );
             console.log("ENCODED CIPHERTEXT LENGTH: " + base64Body.length);
             initial_ciphertexts[resBundle.deviceId] = {
                 type: ciphertext.type,
                 body: base64Body,
-                registrationId: ciphertext.registrationId
+                registrationId: ciphertext.registrationId,
             };
 
             msgStore.addDeviceForChatUser(
@@ -496,12 +503,24 @@ export default function Messages() {
                     console.log(deviceRes.error);
                     return;
                 }
-
+                setUserId(deviceRes.userId);
                 for (let i = 0; i < deviceRes.devices.length; i++) {
-                    msgStore.addDeviceForChatUser(
-                        chatID,
-                        deviceRes.devices[i].id,
-                        deviceRes.devices[i].device_id
+                    if (deviceRes.devices[i].id !== deviceRes.userId) {
+                        console.log(
+                            "ADDING DEVICE",
+                            deviceRes.devices[i],
+                            deviceRes.userId,
+                            deviceRes.devices[i].id === deviceRes.userId
+                        );
+                        msgStore.addDeviceForChatUser(
+                            chatID,
+                            deviceRes.devices[i].id,
+                            deviceRes.devices[i].device_id
+                        );
+                    }
+                    console.log(
+                        "DEVICES IN LIST",
+                        msgStore.getAllDeviceIdsForChat(chatID)
                     );
                 }
 
@@ -597,6 +616,12 @@ export default function Messages() {
         final();
     }, []);
 
+    React.useEffect(() => {
+        if (chatID && loaded) {
+            loadData();
+        }
+    }, [chatID, loaded]);
+
     // Post message
     const postMessage = async () => {
         if (!chatID) {
@@ -623,6 +648,24 @@ export default function Messages() {
                     currentUser.toString(),
                     users[currentUser][j]
                 );
+                const hasSession = await adiStore.loadSession(
+                    address.toString()
+                );
+                if (!hasSession) {
+                    console.log(
+                        "[ERROR] No session found for user",
+                        currentUser,
+                        "device",
+                        users[currentUser][j]
+                    );
+                } else {
+                    console.log(
+                        "[INFO] Session found for user",
+                        currentUser,
+                        "device",
+                        users[currentUser][j]
+                    );
+                }
                 const sessionCipher = new libsignal.SessionCipher(
                     adiStore,
                     address
@@ -637,7 +680,7 @@ export default function Messages() {
                 ciphertexts[users[currentUser][j]] = {
                     type: ciphertext.type,
                     body: base64Body,
-                    registrationId: ciphertext.registrationId
+                    registrationId: ciphertext.registrationId,
                 };
             }
         }
@@ -669,11 +712,13 @@ export default function Messages() {
         console.log(res);
     };
 
+    // Receive message
     const receiveMessage = async (
         message,
         msgChatId,
         senderId,
-        senderDeviceId
+        senderDeviceId,
+        messageId
     ) => {
         console.log("Received message for chat " + msgChatId);
         console.log(message);
@@ -682,23 +727,23 @@ export default function Messages() {
             senderId.toString(),
             senderDeviceId
         );
-        
+
         // Check if session exists
-        console.log("=== DECRYPTION DEBUG ===");
-        console.log("Sender address:", senderId, "Device:", senderDeviceId);
-        console.log("Message type:", message.type);
-        
+        // console.log("=== DECRYPTION DEBUG ===");
+        // console.log("Sender address:", senderId, "Device:", senderDeviceId);
+        // console.log("Message type:", message.type);
+
         const hasSession = await adiStore.loadSession(address.toString());
-        const dump = await adiStore.dump();
-        console.log("ADI Store dump:", dump);
-        console.log("Session exists:", !!hasSession);
-        if (hasSession) {
-            console.log("Session record found");
-        } else {
-            console.log("WARNING: No session found for this address!");
-        }
-        console.log('IDENT ', await adiStore.getIdentityKeyPair());
-        
+        const dump = adiStore.dump();
+        // console.log("ADI Store dump:", dump);
+        // console.log("Session exists:", !!hasSession);
+        // if (hasSession) {
+        //     console.log("Session record found");
+        // } else {
+        //     console.log("WARNING: No session found for this address!");
+        // }
+        // console.log("IDENT ", await adiStore.getIdentityKeyPair());
+
         const sessionCipher = new libsignal.SessionCipher(adiStore, address);
 
         let plaintext;
@@ -706,55 +751,118 @@ export default function Messages() {
             try {
                 const binaryText = ensureArrayBuffer(message.body);
                 console.log("PreKey MESSAGE LENGTH:", binaryText.byteLength);
-                console.log("First 10 bytes:", new Uint8Array(binaryText).slice(0, 10));
-                // function ArrayBufferToString(buffer) {
-                //     return BinaryToString(
-                //         String.fromCharCode.apply(
-                //             null,
-                //             Array.prototype.slice.apply(new Uint8Array(buffer))
-                //         )
-                //     );
-                // }
-
-                // function BinaryToString(binary) {
-                //     var error;
-                //     try {
-                //         return decodeURIComponent(escape(binary));
-                //     } catch (_error) {
-                //         error = _error;
-                //         if (error instanceof URIError) {
-                //             return binary;
-                //         } else {
-                //             throw error;
-                //         }
-                //     }
-                // }
-                // const binaryStr = ArrayBufferToString(binaryText);
-                // console.log("BINARY STR LENGTH:", binaryStr.length);
-                // console.log("BINARY STR:", binaryStr);
                 plaintext = await sessionCipher.decryptPreKeyWhisperMessage(
                     binaryText,
                     "binary"
+                );
+                const chatReq = await fetch(
+                    "http://localhost:8080/api/chat/all",
+                    {
+                        method: "GET",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        credentials: "include",
+                    }
+                );
+
+                if (!chatReq.ok) {
+                    localStorage.removeItem("isAuthenticated");
+                    navigate("/auth?redirect=app/msg");
+                    return false;
+                }
+
+                const chatres = await chatReq.json();
+                console.log(chatres.chats);
+                setChats(chatres.chats);
+
+                for (let i = 0; i < chatres.chats.length; i++) {
+                    msgStore.createChat(
+                        chatres.chats[i].chat_id,
+                        chatres.chats[i].chat_type == 0
+                            ? chatres.chats[i].other_user_name
+                            : chatres.chats[i].chat_name,
+                        chatres.chats[i].other_user_id
+                    );
+                }
+                msgStore.createMessage(
+                    messageId,
+                    msgChatId,
+                    senderId,
+                    "A secure session has been established with this user.",
+                    "PREKEY_RECEIVED",
+                    Date.now()
                 );
             } catch (e) {
                 console.log("PreKey decryption error:", e);
             }
         } else if (message.type === 1) {
             try {
+                const binaryText = ensureArrayBuffer(message.body);
+
                 plaintext = await sessionCipher.decryptWhisperMessage(
-                    ensureArrayBuffer(message.body),
+                    binaryText,
                     "binary"
+                );
+
+                msgStore.incrementUnreadCount(msgChatId);
+                msgStore.createMessage(
+                    messageId,
+                    msgChatId,
+                    senderId,
+                    new TextDecoder().decode(plaintext),
+                    "DELIVERED",
+                    Date.now()
                 );
             } catch (e) {
                 console.log("Whisper decryption error:", e);
             }
         }
+        console.log("Decrypted plaintext:", plaintext);
+        const decoded = new TextDecoder().decode(plaintext);
+        console.log("Decoded plaintext:", decoded);
+        msgStore.incrementUnreadCount(msgChatId);
+        setMessages(msgStore.getMessagesByChatId(chatID) || []);
     };
 
     // Check if user is authenticated
     const isAuthenticated = useAuth();
     if (!isAuthenticated) {
         return null;
+    }
+
+    function formatChatDate(dateInput) {
+        const date = new Date(dateInput);
+        const now = new Date();
+
+        const isToday =
+            date.getDate() === now.getDate() &&
+            date.getMonth() === now.getMonth() &&
+            date.getFullYear() === now.getFullYear();
+
+        if (isToday) {
+            return date.toLocaleTimeString("en-GB", {
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: false,
+            });
+        } else {
+            const yesterday = new Date();
+            yesterday.setDate(now.getDate() - 1);
+
+            const isYesterday =
+                date.getDate() === yesterday.getDate() &&
+                date.getMonth() === yesterday.getMonth() &&
+                date.getFullYear() === yesterday.getFullYear();
+
+            if (isYesterday) return "Yesterday";
+
+            return date.toLocaleDateString("en-GB", {
+                day: "2-digit",
+                month: "2-digit",
+                year: "numeric",
+            });
+        }
     }
 
     return (
@@ -951,19 +1059,28 @@ export default function Messages() {
                     </header>
                     <hr className="hr" />
                     <section className="chat">
-                        <div className="message foreign">
-                            <div className="message-cont">
-                                <p>
-                                    Lorem ipsum dolor sit amet consectetur,
-                                    adipisicing elit. Consequatur hic numquam
-                                    nihil odit? Ut doloremque quisquam nam dicta
-                                    unde? Repudiandae tenetur debitis adipisci
-                                    dolor nostrum accusamus impedit qui
-                                    molestiae. Optio!
-                                </p>
-                            </div>
-                            <p className="time">John Doe - 23:04</p>
-                        </div>
+                        {
+                            // userId !== 0 &&
+                            messages.map((msg) => {
+                                return (
+                                    <div
+                                        className={`message ${
+                                            msg.sender_id === userId
+                                                ? "local"
+                                                : "foreign"
+                                        }`}
+                                    >
+                                        <div className="message-cont">
+                                            <p>{msg.plaintext_content}</p>
+                                        </div>
+                                        <p className="time">
+                                            Me Doe - {formatChatDate(msg.timestamp)}
+                                        </p>
+                                    </div>
+                                );
+                            })
+                        }
+
                         <div className="message foreign">
                             <div className="message-cont">
                                 <p>

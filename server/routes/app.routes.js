@@ -180,6 +180,7 @@ const newChat = async (req, res, next) => {
     // ! SIGNAL PROTOCOL VARIABLES
     let bundles = [];
     let user_ids = [];
+    let notFound = false;
 
     // Add & send key to all members
     for (let i = 0; i < req.body.members.length; i++) {
@@ -188,7 +189,12 @@ const newChat = async (req, res, next) => {
             req.body.members[i].user_no
         );
         if (!user || user.rowCount === 0) {
-            continue;
+            console.log("User not found, skipping:", req.body.members[i]);
+            notFound = true;
+            res.status(400).send({
+                error: `User ${req.body.members[i].display_name}#${req.body.members[i].user_no} does not exist`,
+            });
+            return;
         }
         await query(
             "INSERT INTO chat_members (chat_id, user_id, joined_at) VALUES ($1, $2, $3)",
@@ -218,6 +224,8 @@ const newChat = async (req, res, next) => {
         });
         // ! SIGNAL PROTOCOL IMPLEMENTATION ENDS HERE
     }
+
+    if (notFound) return;
 
     // Send key to creator
     await sendKey(key, req.session.userID, chat.rows[0].id, 1);
@@ -430,6 +438,7 @@ const getChatDevices = async (req, res, next) => {
 
     res.status(200).send({
         devices: devices.rows,
+        userId: req.session.userID,
     });
 };
 
@@ -538,8 +547,8 @@ const postMessage = async (req, res, next) => {
     }
 
     // Post message
-    await query(
-        "INSERT INTO messages (chat_id, sender_id, ciphertext_payloads, timestamp) VALUES ($1, $2, $3, $4)",
+    const msgId = await query(
+        "INSERT INTO messages (chat_id, sender_id, ciphertext_payloads, timestamp) VALUES ($1, $2, $3, $4) RETURNING id",
         [
             req.params.chat_id,
             req.session.userID,
@@ -564,6 +573,7 @@ const postMessage = async (req, res, next) => {
                 chat_id: req.params.chat_id,
                 sender_id: req.session.userID + ":" + req.session.deviceId,
                 ciphertext: req.body.content[deviceId],
+                message_id: msgId.rows[0].id,
             });
             console.log(sent);
         });

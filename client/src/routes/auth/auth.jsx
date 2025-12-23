@@ -646,6 +646,7 @@ export default function Auth() {
         // Store keys in adiStore (for libsignal)
         adiStore.putIdentityKeyPair({
             privKey: ensureArrayBuffer(privateKeys.identityKey.privKey),
+            // privateKeys only stores the private key; we get the public key from server response.
             pubKey: ensureArrayBuffer(res.prekeyBundle.identityKey),
         });
 
@@ -660,24 +661,43 @@ export default function Auth() {
             keyId: privateKeys.signedPreKey.keyId,
         });
 
-        for (let i = 0; i < res.oneTimePreKeys.length; i++) {
-            const opk = res.oneTimePreKeys[i];
+        // for (let i = 0; i < res.oneTimePreKeys.length; i++) {
+        //     const opk = res.oneTimePreKeys[i];
 
-            const privOpk = await crypto.subtle.decrypt(
-                {
-                    name: "AES-GCM",
-                    iv: ensureArrayBuffer(opk.iv),
-                },
-                encKey,
-                ensureArrayBuffer(opk.privKey)
-            );
+        //     const privOpk = await crypto.subtle.decrypt(
+        //         {
+        //             name: "AES-GCM",
+        //             iv: ensureArrayBuffer(opk.iv),
+        //         },
+        //         encKey,
+        //         ensureArrayBuffer(opk.privKey)
+        //     );
 
-            adiStore.storePreKey(opk.keyId, {
-                privKey: ensureArrayBuffer(privOpk),
-                pubKey: ensureArrayBuffer(opk.publicKey),
-                keyId: opk.keyId,
+        //     adiStore.storePreKey(opk.keyId, {
+        //         privKey: ensureArrayBuffer(privOpk),
+        //         pubKey: ensureArrayBuffer(opk.publicKey),
+        //         keyId: opk.keyId,
+        //     });
+        // }
+        console.log(opk);
+        for (let i = 0; i < opk.length; i++) {
+            const opki = opk[i];
+            // const privOpk = await crypto.subtle.decrypt(
+            //     {
+            //         name: "AES-GCM",
+            //         iv: ensureArrayBuffer(opk.iv),
+            //     },
+            //     encKey,
+            //     ensureArrayBuffer(opk.privKey)
+            // );
+
+            adiStore.storePreKey(opki.keyId, {
+                privKey: ensureArrayBuffer(opki.keyPair.privKey),
+                pubKey: ensureArrayBuffer(opki.keyPair.pubKey),
+                keyId: opki.keyId,
             });
         }
+        // TODO: you left here. bad mac error solved. finish message receiving.
 
         // ! SIGNAL IMPLEMENTATION STOPS HERE
 
