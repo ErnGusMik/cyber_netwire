@@ -8,7 +8,6 @@ import Input from "../../components/input/input";
 import Profile from "../../components/profile/profile";
 import Boolean from "../../components/boolean/boolean";
 import { useNavigate, NavLink, useParams } from "react-router-dom";
-import { type } from "@testing-library/user-event/dist/type";
 import adiStore from "../../adiStore";
 import msgStore from "../../msgStore";
 import logout from "../../helpers/logout.helper";
@@ -250,7 +249,6 @@ export default function Messages() {
         });
 
         const res = await req.json();
-        console.log(res);
         if (!req.ok) {
             console.log("[ERROR] Could not create chat");
             console.log(res.error);
@@ -318,14 +316,10 @@ export default function Messages() {
                 Uint8Array.from([0, 0, 0, 0]).buffer
             );
 
-            console.log("CIPHERTEXT" + resBundle.deviceId);
-            console.log(ciphertext);
-            console.log("BINARY LEN", ciphertext.body.byteLength);
-            // encode ciphertext body to base64 safely using helpers
             const base64Body = arrayBufferToBase64(
                 ensureArrayBuffer(ciphertext.body)
             );
-            console.log("ENCODED CIPHERTEXT LENGTH: " + base64Body.length);
+
             initial_ciphertexts[resBundle.deviceId] = {
                 type: ciphertext.type,
                 body: base64Body,
@@ -429,7 +423,6 @@ export default function Messages() {
             }
 
             const res = await req.json();
-            console.log(res.chats);
             setChats(res.chats);
 
             for (let i = 0; i < res.chats.length; i++) {
@@ -499,7 +492,6 @@ export default function Messages() {
                 );
 
                 const deviceRes = await deviceReq.json();
-                console.log(deviceRes);
 
                 if (!deviceReq.ok) {
                     if (deviceReq.status === 401) {
@@ -513,22 +505,12 @@ export default function Messages() {
                 setUserId(deviceRes.userId);
                 for (let i = 0; i < deviceRes.devices.length; i++) {
                     if (deviceRes.devices[i].id !== deviceRes.userId) {
-                        console.log(
-                            "ADDING DEVICE",
-                            deviceRes.devices[i],
-                            deviceRes.userId,
-                            deviceRes.devices[i].id === deviceRes.userId
-                        );
                         msgStore.addDeviceForChatUser(
                             chatID,
                             deviceRes.devices[i].id,
                             deviceRes.devices[i].device_id
                         );
                     }
-                    console.log(
-                        "DEVICES IN LIST",
-                        msgStore.getAllDeviceIdsForChat(chatID)
-                    );
                 }
 
                 const req = await fetch(
@@ -549,15 +531,8 @@ export default function Messages() {
                         navigate("/auth?redirect=app/msg/");
                     }
                 }
-                console.log(res);
 
-                // Decrypt and store last messages for this chat
                 try {
-                    const myDeviceId = parseInt(
-                        localStorage.getItem("deviceId") || "0",
-                        10
-                    );
-                    // Determine other user id (for 1:1 chats)
                     const otherUserId =
                         (deviceRes.devices || [])
                             .map((d) => d.id)
@@ -568,62 +543,30 @@ export default function Messages() {
                         : [];
 
                     for (const row of res.messages || []) {
-                        console.log("Processing message", row);
-                        // Skip if already stored
                         if (msgStore.getMessage(row.id)) continue;
 
                         const payloads = row.ciphertext_payloads || {};
-                        console.log("Payloads:", payloads);
-
-                        // Get all payload entries for this message
                         const payloadEntries = Object.entries(payloads);
-                        console.log("Payload entries:", payloadEntries.length);
 
-                        // Determine if message is from us or other user
                         const messageSenderId = row.user_no;
                         const isFromUs = messageSenderId === deviceRes.userId;
-                        console.log(
-                            "Message from:",
-                            messageSenderId,
-                            "Us:",
-                            deviceRes.userId,
-                            "IsFromUs:",
-                            isFromUs
-                        );
 
                         let stored = false;
                         for (const [deviceKey, ct] of payloadEntries) {
-                            console.log(
-                                "Trying device key:",
-                                deviceKey,
-                                "Payload:",
-                                ct
-                            );
                             if (!ct || !ct.body) {
                                 console.log("No body in payload");
                                 continue;
                             }
 
                             const body = ensureArrayBuffer(ct.body);
-                            console.log("Body length:", body?.byteLength);
-
-                            // Determine sender info for session lookup
                             const senderUserId = isFromUs
                                 ? otherUserId
                                 : messageSenderId;
 
-                            // Try each known sender device to find the correct session
                             const trySenderDevices =
                                 otherUserDevices.length > 0
                                     ? otherUserDevices
                                     : [deviceKey];
-
-                            console.log(
-                                "Trying sender devices:",
-                                trySenderDevices,
-                                "for sender:",
-                                senderUserId
-                            );
 
                             for (const sDev of trySenderDevices) {
                                 try {
@@ -632,10 +575,6 @@ export default function Messages() {
                                             String(senderUserId),
                                             parseInt(sDev)
                                         );
-                                    console.log(
-                                        "Trying address:",
-                                        address.toString()
-                                    );
 
                                     const sessionCipher =
                                         new libsignal.SessionCipher(
@@ -644,18 +583,12 @@ export default function Messages() {
                                         );
                                     let plaintextBuf;
                                     if (ct.type === 3) {
-                                        console.log(
-                                            "Decrypting PreKey message"
-                                        );
                                         plaintextBuf =
                                             await sessionCipher.decryptPreKeyWhisperMessage(
                                                 body,
                                                 "binary"
                                             );
                                     } else {
-                                        console.log(
-                                            "Decrypting regular message"
-                                        );
                                         plaintextBuf =
                                             await sessionCipher.decryptWhisperMessage(
                                                 body,
@@ -664,10 +597,6 @@ export default function Messages() {
                                     }
                                     const decoded = new TextDecoder().decode(
                                         plaintextBuf
-                                    );
-                                    console.log(
-                                        "Successfully decrypted:",
-                                        decoded
                                     );
 
                                     msgStore.createMessage(
@@ -706,50 +635,6 @@ export default function Messages() {
                 } catch (e) {
                     console.log("[history] failed to process messages", e);
                 }
-            }
-        };
-
-        const chatKey = async () => {
-            if (chatID) {
-                const req = await fetch(
-                    `http://localhost:8080/api/chat/${chatID}/key/latest`,
-                    {
-                        method: "GET",
-                        headers: {
-                            "Content-Type": "application/json",
-                        },
-                        credentials: "include",
-                    }
-                );
-
-                const res = await req.json();
-                if (!req.ok) {
-                    if (req.status === 401) {
-                        localStorage.removeItem("isAuthenticated");
-                        navigate("/auth?redirect=app/msg/");
-                    }
-                }
-                console.log(res);
-
-                // try {
-                const key = hexToUint8Array(res.key);
-                if ("serviceWorker" in navigator) {
-                    navigator.serviceWorker.controller.postMessage({
-                        type: "decrypt",
-                        ciphertext: key,
-                    });
-                    navigator.serviceWorker.onmessage = (event) => {
-                        if (event.data.status === "success") {
-                            console.log(event.data.plaintext);
-                        } else if (event.data.status === "decryptionError") {
-                            console.log(event.data.error);
-                        }
-                    };
-                }
-                // } catch (e) {
-                // console.log(e);
-                // }
-                setChatKey(res.key);
             }
         };
 
@@ -834,10 +719,8 @@ export default function Messages() {
             console.log("[ERROR] No users/devices found for chat");
             return;
         }
-        console.log(users);
         const buffer = new TextEncoder().encode(message).buffer;
-        console.log("LENGTH:", buffer.byteLength);
-        let ciphertexts = {}; 
+        let ciphertexts = {};
         for (let i = 0; i < Object.keys(users).length; i++) {
             for (let j = 0; j < users[Object.keys(users)[i]].length; j++) {
                 const currentUser = Object.keys(users)[i];
@@ -931,9 +814,6 @@ export default function Messages() {
                     address
                 );
                 const ciphertext = await sessionCipher.encrypt(buffer);
-                console.log("CIPHERTEXT" + users[currentUser][j]);
-                console.log(ciphertext);
-                // encode ciphertext body to base64 safely using helpers
                 const base64Body = arrayBufferToBase64(
                     ensureArrayBuffer(ciphertext.body)
                 );
@@ -991,9 +871,6 @@ export default function Messages() {
         messageId,
         senderName
     ) => {
-        console.log("Received message for chat " + msgChatId);
-        console.log(message);
-
         const address = new libsignal.SignalProtocolAddress(
             senderId.toString(),
             senderDeviceId
@@ -1028,7 +905,6 @@ export default function Messages() {
                 }
 
                 const chatres = await chatReq.json();
-                console.log(chatres.chats);
                 setChats(chatres.chats);
 
                 for (let i = 0; i < chatres.chats.length; i++) {
@@ -1040,7 +916,6 @@ export default function Messages() {
                         chatres.chats[i].other_user_id
                     );
                 }
-                console.log("Decrypted PreKey plaintext:", plaintext);
 
                 if (
                     new TextDecoder().decode(plaintext) ==
@@ -1094,13 +969,9 @@ export default function Messages() {
                 console.log("Whisper decryption error:", e);
             }
         }
-        console.log("Decrypted plaintext:", plaintext);
         const decoded = new TextDecoder().decode(plaintext);
-        console.log("Decoded plaintext:", decoded);
         msgStore.incrementUnreadCount(msgChatId);
         const currentMessages = msgStore.getMessagesByChatId(chatID) || [];
-        console.log("MSG ID = CHAT ID", chatID === msgChatId);
-        console.log("CURRENT MESSAGES:", currentMessages);
         setMessages(currentMessages);
     };
 
@@ -1110,7 +981,7 @@ export default function Messages() {
         return null;
     }
 
-    function formatChatDate(dateInput) {
+    const formatChatDate = (dateInput) => {
         const date = new Date(dateInput);
         const now = new Date();
 
@@ -1142,7 +1013,7 @@ export default function Messages() {
                 year: "numeric",
             });
         }
-    }
+    };
 
     return (
         <div className="messages-cont">
@@ -1253,8 +1124,8 @@ export default function Messages() {
                                 {chats.filter((chat) => chat.chat_type === 0)
                                     .length === 0 && (
                                     <p className="no-chats">
-                                        No DM channels yet. Create one!
-                                        (coming soon)
+                                        No DM channels yet. Create one! (coming
+                                        soon)
                                     </p>
                                 )}
                                 {chats.map((chat) => {
@@ -1420,6 +1291,7 @@ export default function Messages() {
                             You
                         </li>
                     </ul>
+                    <p>This sidebar is still under construction ;)</p>
                     <div className="profile-cont">
                         <Profile />
                     </div>
@@ -1604,10 +1476,10 @@ export default function Messages() {
                 </div>
             </div>
             <div className="small-overlay">
-                    <p>
-                        Please use a device with a bigger screen <br />
-                    </p>
-                    <span>(at least 850px wide)</span>
+                <p>
+                    Please use a device with a bigger screen <br />
+                </p>
+                <span>(at least 850px wide)</span>
             </div>
         </div>
     );

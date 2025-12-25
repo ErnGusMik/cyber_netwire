@@ -6,7 +6,6 @@ import {
     getUserFromDisplayName,
     sendKey,
     checkIfUserExists,
-    checkIfUsersAreFriends,
     fetchPrekeyBundle,
     checkIfChatExists,
     getAllActiveDevicesForUser,

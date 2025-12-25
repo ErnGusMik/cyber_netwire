@@ -7,12 +7,9 @@ import * as libsignal from "@privacyresearch/libsignal-protocol-typescript";
 import Button from "../../components/button/button";
 import Input from "../../components/input/input";
 import Nav from "../../components/nav/nav";
-import { redirect, useSearchParams } from "react-router-dom";
-import { type } from "@testing-library/user-event/dist/type";
 import adiStore from "../../adiStore";
 
 import { Argon2, Argon2Mode } from "@sphereon/isomorphic-argon2";
-import { ident } from "pg-format";
 
 export default function Auth() {
     const [signup, setSignup] = useState(false);

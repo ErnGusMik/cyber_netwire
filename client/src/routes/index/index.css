@@ -113,6 +113,12 @@
     max-width: 70%;
 }
 
+.homepage .banner img {
+    max-width: 55%;
+    max-height: 80vh;
+    margin: auto;
+}
+
 /* BUTTON */
 .homepage .btn {
     background-color: var(--background-color);

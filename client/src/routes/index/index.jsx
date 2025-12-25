@@ -149,10 +149,10 @@ export default function Index() {
                         <a href="">More</a>
                     </li>
                     <li>
-                        <a href="/auth">Log in</a>
+                        <a href="/auth?redirect=app/msg">Log in</a>
                     </li>
                     <li className="nav-emphasis">
-                        <a href="/auth">Sign up</a>
+                        <a href="/auth?redirect=app/msg">Sign up</a>
                     </li>
                 </ul>
             </div>
@@ -174,7 +174,7 @@ export default function Index() {
                     </a>
                 </div>
                 <img
-                    src="img-placeholder.webp"
+                    src="banner.png"
                     alt="A banner pic will go here at some point"
                 />
             </div>
@@ -340,7 +340,6 @@ export default function Index() {
             <div className="connections">
                 <p className="module-name secondary">/// .SUBMODULE.$CONNECT</p>
                 <div className="main">
-                    {/* infinite horizontal scroll of the text 'instant connections' multiple times */}
                     <div className="text-cont">
                         <div className="inf-scroll-cont">
                             <div className="scroll-cont"></div>
@@ -385,7 +384,7 @@ export default function Index() {
                         <h2 className="secondary">You can't scroll anymore.</h2>
                         <h2>Better go hang out.</h2>
                     </div>
-                    <a href="/auth">
+                    <a href="/auth?redirect=app/msg">
                         <button className="btn">
                             <h3>Join the revolution</h3>
                         </button>
@@ -420,7 +419,7 @@ export default function Index() {
                         <h4>Cyber Netwire</h4>
                         <p className="tertiary">Copyright &copy; 2025 ernestsgm.</p>
                     </div>
-                    <a href="/auth">
+                    <a href="/auth?redirect=app/msg">
                         <button className="btn">
                             <h3>Open Cyber Netwire</h3>
                         </button>

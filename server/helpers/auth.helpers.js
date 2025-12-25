@@ -2,7 +2,6 @@ import crypto, { pbkdf2 } from "crypto";
 import bcrypt from "bcrypt";
 
 import query, { pool } from "../db/db.connect.js";
-import format from "pg-format";
 import * as argon from "argon2";
 
 const checkIfUserExists = async (email) => {
