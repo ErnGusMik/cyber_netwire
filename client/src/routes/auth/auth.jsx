@@ -668,24 +668,7 @@ export default function Auth() {
             keyId: privateKeys.signedPreKey.keyId,
         });
 
-        // for (let i = 0; i < res.oneTimePreKeys.length; i++) {
-        //     const opk = res.oneTimePreKeys[i];
 
-        //     const privOpk = await crypto.subtle.decrypt(
-        //         {
-        //             name: "AES-GCM",
-        //             iv: ensureArrayBuffer(opk.iv),
-        //         },
-        //         encKey,
-        //         ensureArrayBuffer(opk.privKey)
-        //     );
-
-        //     adiStore.storePreKey(opk.keyId, {
-        //         privKey: ensureArrayBuffer(privOpk),
-        //         pubKey: ensureArrayBuffer(opk.publicKey),
-        //         keyId: opk.keyId,
-        //     });
-        // }
         console.log(opk);
         for (let i = 0; i < opk.length; i++) {
             const opki = opk[i];
@@ -704,8 +687,6 @@ export default function Auth() {
                 keyId: opki.keyId,
             });
         }
-        // TODO: you left here. bad mac error solved. finish message receiving.
-
         // ! SIGNAL IMPLEMENTATION STOPS HERE
 
         // Setup service worker with decrypted RSA key

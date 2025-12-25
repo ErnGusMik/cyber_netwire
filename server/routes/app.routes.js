@@ -11,6 +11,7 @@ import {
     checkIfChatExists,
     getAllActiveDevicesForUser,
     getAllChatMembers,
+    getUserDisplayName,
 } from "../helpers/app.helpers.js";
 
 import { checkIfUserExists as checkIfUserExistsByEmail } from "../helpers/auth.helpers.js";
@@ -559,6 +560,7 @@ const postMessage = async (req, res, next) => {
     );
 
     const members = await getAllChatMembers(req.params.chat_id);
+    const displayName = await getUserDisplayName(req.session.userID);
 
     for (let i = 0; i < members.length; i++) {
         if (members[i] === req.session.userID) {
@@ -572,6 +574,7 @@ const postMessage = async (req, res, next) => {
                 sender_id: req.session.userID + ":" + req.session.deviceId,
                 ciphertext: req.body.content[deviceId],
                 message_id: msgId.rows[0].id,
+                senderName: displayName,
             });
             console.log(sent);
         });

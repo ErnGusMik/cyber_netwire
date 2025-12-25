@@ -19,7 +19,7 @@ const openSocket = (receiveMessage) => {
                 // console.log("Parsed userId:", parseInt(data.sender_id.split(":")[0]));
                 // console.log("Parsed deviceId:", parseInt(data.sender_id.split(":")[1]));
                 // console.log("Ciphertext:", data.ciphertext);
-                receiveMessage(data.ciphertext, data.chat_id, parseInt(data.sender_id.split(":")[0]), parseInt(data.sender_id.split(":")[1]), data.message_id);
+                receiveMessage(data.ciphertext, data.chat_id, parseInt(data.sender_id.split(":")[0]), parseInt(data.sender_id.split(":")[1]), data.message_id, data.senderName);
             }
         } catch (err) {
             console.warn("Failed to parse WS message", err);

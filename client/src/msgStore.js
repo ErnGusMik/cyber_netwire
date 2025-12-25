@@ -321,12 +321,13 @@ const store = {
     },
 
     // MESSAGES - store a new message
-    createMessage: function (messageId, chatId, senderId, plaintextContent, status = "SENT", timestamp = Date.now()) {
+    createMessage: function (messageId, chatId, senderId, plaintextContent, status = "SENT", timestamp = Date.now(), senderName = "Other user") {
         const message = {
             message_id: messageId,
             chat_id: chatId,
             timestamp: timestamp,
             sender_id: senderId,
+            sender_name: senderName,
             plaintext_content: plaintextContent,
             status: status,
         };

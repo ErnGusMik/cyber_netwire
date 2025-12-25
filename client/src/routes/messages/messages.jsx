@@ -366,6 +366,16 @@ export default function Messages() {
             return;
         }
 
+        msgStore.createMessage(
+            postRes.message_id,
+            res.chat_id,
+            userId,
+            "You started a secure session with this user.",
+            "PREKEY_MSG_SENT",
+            Date.now(),
+            "System"
+        );
+
         // Redirect to new chat
         document.querySelector(".add-overlay").style.display = "none";
         return navigate("/app/msg/" + res.chat_id);
@@ -769,10 +779,40 @@ export default function Messages() {
         final();
     }, []);
 
+    // Reload chat data on chatID change (not only on page reload)
     React.useEffect(() => {
         if (chatID && loaded) {
+            // Scroll to bottom of chat
+            setTimeout(() => {
+                const chatElement = document.querySelector(".chat");
+                if (chatElement) {
+                    chatElement.scrollTop = chatElement.scrollHeight;
+                }
+            }, 0);
             loadData();
         }
+    }, [chatID, loaded]);
+
+    // Scroll to bottom on new message
+    React.useEffect(() => {
+        const chatElement = document.querySelector(".chat");
+        if (chatElement) chatElement.scrollTop = chatElement.scrollHeight;
+    }, [messages]);
+
+    // Send message on Enter (but allow Shift+Enter for newline)
+    React.useEffect(() => {
+        const inputEl = document.getElementById("message-input");
+        if (!inputEl) return;
+
+        const handleKeyDown = (e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                postMessage();
+            }
+        };
+
+        inputEl.addEventListener("keydown", handleKeyDown);
+        return () => inputEl.removeEventListener("keydown", handleKeyDown);
     }, [chatID, loaded]);
 
     // Post message
@@ -781,11 +821,15 @@ export default function Messages() {
             return;
         }
         const message = document.getElementById("message-input").value;
-
+        document.getElementById("message-input").value = "";
+        if (message.trim() === "") {
+            console.log("[ERROR] Cannot send empty message");
+            return;
+        }
         // ! SIGNAL PROTOCOL IMPLEMENTATION STARTS HERE
         // Message sending flow (Diffie-Hellman ratchet)
         // Set up encryption
-        const users = msgStore.getAllDeviceIdsForChat(chatID); // { userId: [deviceIds] }
+        const users = msgStore.getAllDeviceIdsForChat(chatID);
         if (!users || Object.keys(users).length === 0) {
             console.log("[ERROR] No users/devices found for chat");
             return;
@@ -793,7 +837,7 @@ export default function Messages() {
         console.log(users);
         const buffer = new TextEncoder().encode(message).buffer;
         console.log("LENGTH:", buffer.byteLength);
-        let ciphertexts = {}; // deviceId: ciphertext
+        let ciphertexts = {}; 
         for (let i = 0; i < Object.keys(users).length; i++) {
             for (let j = 0; j < users[Object.keys(users)[i]].length; j++) {
                 const currentUser = Object.keys(users)[i];
@@ -932,10 +976,10 @@ export default function Messages() {
             userId,
             message,
             "SENT",
-            Date.now()
+            Date.now(),
+            "You"
         );
         setMessages(msgStore.getMessagesByChatId(chatID) || []);
-        document.getElementById("message-input").value = "";
     };
 
     // Receive message
@@ -944,7 +988,8 @@ export default function Messages() {
         msgChatId,
         senderId,
         senderDeviceId,
-        messageId
+        messageId,
+        senderName
     ) => {
         console.log("Received message for chat " + msgChatId);
         console.log(message);
@@ -953,22 +998,6 @@ export default function Messages() {
             senderId.toString(),
             senderDeviceId
         );
-
-        // Check if session exists
-        // console.log("=== DECRYPTION DEBUG ===");
-        // console.log("Sender address:", senderId, "Device:", senderDeviceId);
-        // console.log("Message type:", message.type);
-
-        const hasSession = await adiStore.loadSession(address.toString());
-        const dump = adiStore.dump();
-        // console.log("ADI Store dump:", dump);
-        // console.log("Session exists:", !!hasSession);
-        // if (hasSession) {
-        //     console.log("Session record found");
-        // } else {
-        //     console.log("WARNING: No session found for this address!");
-        // }
-        // console.log("IDENT ", await adiStore.getIdentityKeyPair());
 
         const sessionCipher = new libsignal.SessionCipher(adiStore, address);
 
@@ -1011,14 +1040,34 @@ export default function Messages() {
                         chatres.chats[i].other_user_id
                     );
                 }
-                msgStore.createMessage(
-                    messageId,
-                    msgChatId,
-                    senderId,
-                    "A secure session has been established with this user.",
-                    "PREKEY_RECEIVED",
-                    Date.now()
-                );
+                console.log("Decrypted PreKey plaintext:", plaintext);
+
+                if (
+                    new TextDecoder().decode(plaintext) ==
+                    new TextDecoder().decode(
+                        Uint8Array.from([0, 0, 0, 0]).buffer
+                    )
+                ) {
+                    msgStore.createMessage(
+                        messageId,
+                        msgChatId,
+                        senderId,
+                        "A secure session has been established with this user.",
+                        "PREKEY_RECEIVED",
+                        Date.now(),
+                        "System"
+                    );
+                } else {
+                    msgStore.createMessage(
+                        messageId,
+                        msgChatId,
+                        senderId,
+                        new TextDecoder().decode(plaintext),
+                        "PREKEY_MSG_RECEIVED",
+                        Date.now(),
+                        senderName
+                    );
+                }
             } catch (e) {
                 console.log("PreKey decryption error:", e);
             }
@@ -1038,7 +1087,8 @@ export default function Messages() {
                     senderId,
                     new TextDecoder().decode(plaintext),
                     "DELIVERED",
-                    Date.now()
+                    Date.now(),
+                    senderName
                 );
             } catch (e) {
                 console.log("Whisper decryption error:", e);
@@ -1127,7 +1177,7 @@ export default function Messages() {
                             <h3 className="secondary bold section-header section-item">
                                 Feeds
                             </h3>
-                            <p className="section-item secondary bold active">
+                            {/* <p className="section-item secondary bold active">
                                 <span className="list">#</span> Watson
                                 <span className="msg-count">2</span>
                             </p>
@@ -1141,7 +1191,17 @@ export default function Messages() {
                                 <span className="list">#</span>{" "}
                                 T_SQUAD_Netrunners
                                 <span className="msg-count">3</span>
-                            </p>
+                            </p> */}
+                            {chats.filter((chat) => chat.chat_type === 1)
+                                .length === 0 && (
+                                <p className="no-chats">
+                                    No feed channels yet. Create one! (coming
+                                    soon)
+                                </p>
+                            )}
+                            {/* <p className="no-chats">
+                                No feed channels yet. Create one! (coming soon)
+                            </p> */}
                             {chats.map((chat) => {
                                 if (chat.chat_type === 1) {
                                     return (
@@ -1177,7 +1237,7 @@ export default function Messages() {
                                 Direct
                             </h3>
                             <ul>
-                                <li className="section-item secondary bold">
+                                {/* <li className="section-item secondary bold">
                                     <span className="list status online" />
                                     Person 1<span className="msg-count">2</span>
                                 </li>
@@ -1189,7 +1249,14 @@ export default function Messages() {
                                 <li className="section-item secondary">
                                     <span className="list status offline" />
                                     Person 3
-                                </li>
+                                </li> */}
+                                {chats.filter((chat) => chat.chat_type === 0)
+                                    .length === 0 && (
+                                    <p className="no-chats">
+                                        No DM channels yet. Create one!
+                                        (coming soon)
+                                    </p>
+                                )}
                                 {chats.map((chat) => {
                                     if (chat.chat_type === 0) {
                                         return (
@@ -1288,48 +1355,27 @@ export default function Messages() {
                     </header>
                     <hr className="hr" />
                     <section className="chat">
-                        {
-                            // userId !== 0 &&
-                            messages.map((msg) => {
-                                return (
-                                    <div
-                                        className={`message ${
-                                            msg.sender_id === userId
-                                                ? "local"
-                                                : "foreign"
-                                        }`}
-                                    >
-                                        <div className="message-cont">
-                                            <p>{msg.plaintext_content}</p>
-                                        </div>
-                                        <p className="time">
-                                            Me Doe -{" "}
-                                            {formatChatDate(msg.timestamp)}
-                                        </p>
+                        {messages.map((msg) => {
+                            return (
+                                <div
+                                    className={`message ${
+                                        msg.sender_id === userId
+                                            ? "local"
+                                            : "foreign"
+                                    }`}
+                                >
+                                    <div className="message-cont">
+                                        <p>{msg.plaintext_content}</p>
                                     </div>
-                                );
-                            })
-                        }
-
-                        <div className="message foreign">
-                            <div className="message-cont">
-                                <p>
-                                    Lorem ipsum dolor sit amet consectetur,
-                                    adipisicing elit. Consequatur hic numquam
-                                    nihil odit? Ut doloremque quisquam nam dicta
-                                    unde? Repudiandae tenetur debitis adipisci
-                                    dolor nostrum accusamus impedit qui
-                                    molestiae. Optio!
-                                </p>
-                            </div>
-                            <p className="time">John Doe - 23:04</p>
-                        </div>
-                        <div className="message local">
-                            <div className="message-cont">
-                                <p>Totally agree!</p>
-                            </div>
-                            <p className="time">You - 23:04</p>
-                        </div>
+                                    <p className="time">
+                                        {msg.sender_id == userId
+                                            ? "You"
+                                            : msg.sender_name}{" "}
+                                        - {formatChatDate(msg.timestamp)}
+                                    </p>
+                                </div>
+                            );
+                        })}
                     </section>
                     <section className="input-cont">
                         <Button
@@ -1556,6 +1602,12 @@ export default function Messages() {
                         ></path>
                     </svg>
                 </div>
+            </div>
+            <div className="small-overlay">
+                    <p>
+                        Please use a device with a bigger screen <br />
+                    </p>
+                    <span>(at least 850px wide)</span>
             </div>
         </div>
     );

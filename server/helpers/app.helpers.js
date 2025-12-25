@@ -74,6 +74,18 @@ const checkIfUsersAreFriends = async (userNo, friendNo) => {
     return result.rowCount > 0 ? result : result2;
 };
 
+const getUserDisplayName = async (user_id) => {
+    const result = await query(
+        'SELECT display_name FROM "user" WHERE id = $1',
+        [user_id]
+    );
+
+    if (result.rowCount === 0) {
+        return null;
+    }
+    return result.rows[0].display_name;
+};
+
 const sendKey = async (key, user_id, chat_id, key_version) => {
     const pub_key = await query('SELECT pub_key FROM "user" WHERE id = $1', [
         user_id,
@@ -210,4 +222,5 @@ export {
     getAllChatMembers,
     toBuffer,
     buf2hex,
+    getUserDisplayName,
 };
