@@ -146,7 +146,7 @@ const fetchPrekeyBundle = async (userId) => {
                 signature: arrayBufferToBase64Node(device.spk_signature), // ArrayBuffer
             },
             preKey: {},
-            //deviceId: device.device_id,
+            deviceId: device.device_id,
         };
         const prekeyRes = await query(
             "SELECT * FROM opk_keys WHERE user_id = $1 AND is_used = false AND device_id = $2 ORDER BY key_id ASC LIMIT 1",
@@ -168,24 +168,6 @@ const fetchPrekeyBundle = async (userId) => {
         }
         allBundles.push(bundle);
     }
-
-    // const bundle = {
-    //     registrationId: identityBundle.rows[0].registration_id,
-    //     deviceId: deviceBundle.rows[0].device_id,
-    //     identityKey: arrayBufferToBase64Node(
-    //         identityBundle.rows[0].identity_key
-    //     ), // ArrayBuffer
-    //     signedPreKey: {
-    //         keyId: deviceBundle.rows[0].spk_id,
-    //         publicKey: arrayBufferToBase64Node(
-    //             deviceBundle.rows[0].spk_public_key
-    //         ), // ArrayBuffer
-    //         signature: arrayBufferToBase64Node(
-    //             deviceBundle.rows[0].spk_signature
-    //         ), // ArrayBuffer
-    //     },
-    //     preKey: {},
-    // };
 
     return allBundles;
 };

@@ -392,7 +392,7 @@ const getChatMessages = async (req, res, next) => {
             m.ciphertext_payloads,
             m.timestamp,
             u.display_name,
-            u.user_no
+            u.id as user_no
         FROM
             messages m
         JOIN
@@ -564,9 +564,7 @@ const postMessage = async (req, res, next) => {
         if (members[i] === req.session.userID) {
             continue;
         }
-        const deviceIds = await getAllActiveDevicesForUser(
-            members[i]
-        );
+        const deviceIds = await getAllActiveDevicesForUser(members[i]);
         deviceIds.forEach((deviceId) => {
             const sent = sendToDevice(members[i], deviceId, {
                 type: "new_message",
@@ -581,7 +579,47 @@ const postMessage = async (req, res, next) => {
 
     res.status(201).send({
         csrfToken: csrf,
+        message_id: msgId.rows[0].id,
     });
+};
+
+const getSessionData = async (req, res, next) => {
+    // Check if user is logged in
+    if (!req.session.email || req.session.loggedIn !== true) {
+        res.status(401).send({
+            error: "Invalid session. Have you logged in?",
+        });
+        return;
+    }
+
+    if (!req.params.userId || !req.params.deviceId) {
+        res.status(400).send({
+            error: "Missing userId or deviceId",
+        });
+        return;
+    }
+
+    // Fetch Prekey bundle
+    const prekeyBundles = await fetchPrekeyBundle(req.params.userId);
+    if (prekeyBundles === null || prekeyBundles.length === 0) {
+        res.status(404).send({
+            error: "Failed to fetch Prekey Bundle for Signal Protocol",
+        });
+        return;
+    }
+
+    const bundle = prekeyBundles.find((b => b.deviceId.toString() === req.params.deviceId.toString()));
+    if (!bundle) {
+        res.status(404).send({
+            error: "Prekey Bundle for specified device not found",
+        });
+        return;
+    }
+
+    res.status(200).send({
+        prekeyBundle: bundle
+    });
+
 };
 
 export {
@@ -594,5 +632,6 @@ export {
     getChatMessages,
     postMessage,
     getChatKey,
-    getChatDevices
+    getChatDevices,
+    getSessionData,
 };

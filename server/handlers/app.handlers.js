@@ -16,5 +16,6 @@ router.get("/chat/:chat_id/messages/:limit", app.getChatMessages);
 router.get("/chat/:chat_id/key/:version", app.getChatKey);
 router.post("/chat/:chat_id/post", app.postMessage);
 router.get("/chat/:chat_id/devices", app.getChatDevices);
+router.get("/session/:userId/:deviceId", app.getSessionData);
 
 export default router;

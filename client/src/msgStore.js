@@ -330,7 +330,8 @@ const store = {
             plaintext_content: plaintextContent,
             status: status,
         };
-        this.put(messageId, message, STORE_MESSAGES);
+        const key = `messages:${messageId}`;
+        this.put(key, message, STORE_MESSAGES);
         return message;
     },
 
@@ -363,7 +364,8 @@ const store = {
         const message = this.getMessage(messageId);
         if (message) {
             message.status = newStatus;
-            this.put(messageId, message, STORE_MESSAGES);
+            const key = `messages:${messageId}`;
+            this.put(key, message, STORE_MESSAGES);
         }
     },
 
@@ -372,7 +374,8 @@ const store = {
         const message = this.getMessage(messageId);
         if (message) {
             message.plaintext_content = newContent;
-            this.put(messageId, message, STORE_MESSAGES);
+            const key = `messages:${messageId}`;
+            this.put(key, message, STORE_MESSAGES);
         }
     },
 
@@ -389,14 +392,16 @@ const store = {
 
     // Delete a single message
     deleteMessage: function (messageId) {
-        this.remove(messageId, STORE_MESSAGES);
+        const key = `messages:${messageId}`;
+        this.remove(key, STORE_MESSAGES);
     },
 
     // Delete all messages in a chat
     deleteMessagesByChat: function (chatId) {
         const messages = this.getMessagesByChatId(chatId);
         for (const msg of messages) {
-            this.remove(msg.message_id, STORE_MESSAGES);
+            const key = `messages:${msg.message_id}`;
+            this.remove(key, STORE_MESSAGES);
         }
     },
 

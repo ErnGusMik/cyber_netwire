@@ -643,6 +643,13 @@ export default function Auth() {
         setCSRFToken(registrationRes.csrfToken);
         prevCsrfToken = registrationRes.csrfToken;
 
+        // Persist current deviceId for selecting ciphertexts on this client
+        try {
+            if (registrationRes.deviceId) {
+                localStorage.setItem("deviceId", String(registrationRes.deviceId));
+            }
+        } catch (_) {}
+
         // Store keys in adiStore (for libsignal)
         adiStore.putIdentityKeyPair({
             privKey: ensureArrayBuffer(privateKeys.identityKey.privKey),

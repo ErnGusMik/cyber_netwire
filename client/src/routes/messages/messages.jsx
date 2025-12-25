@@ -354,9 +354,6 @@ export default function Messages() {
                 credentials: "include",
                 body: JSON.stringify({
                     content: initial_ciphertexts,
-                    // header_data: {
-                    //     sender_dh_pubkey: arrayBufferToBase64(),
-                    // }
                 }),
             }
         );
@@ -543,6 +540,162 @@ export default function Messages() {
                     }
                 }
                 console.log(res);
+
+                // Decrypt and store last messages for this chat
+                try {
+                    const myDeviceId = parseInt(
+                        localStorage.getItem("deviceId") || "0",
+                        10
+                    );
+                    // Determine other user id (for 1:1 chats)
+                    const otherUserId =
+                        (deviceRes.devices || [])
+                            .map((d) => d.id)
+                            .find((id) => id !== deviceRes.userId) || null;
+
+                    const otherUserDevices = otherUserId
+                        ? msgStore.getDeviceIdsForChatUser(chatID, otherUserId)
+                        : [];
+
+                    for (const row of res.messages || []) {
+                        console.log("Processing message", row);
+                        // Skip if already stored
+                        if (msgStore.getMessage(row.id)) continue;
+
+                        const payloads = row.ciphertext_payloads || {};
+                        console.log("Payloads:", payloads);
+
+                        // Get all payload entries for this message
+                        const payloadEntries = Object.entries(payloads);
+                        console.log("Payload entries:", payloadEntries.length);
+
+                        // Determine if message is from us or other user
+                        const messageSenderId = row.user_no;
+                        const isFromUs = messageSenderId === deviceRes.userId;
+                        console.log(
+                            "Message from:",
+                            messageSenderId,
+                            "Us:",
+                            deviceRes.userId,
+                            "IsFromUs:",
+                            isFromUs
+                        );
+
+                        let stored = false;
+                        for (const [deviceKey, ct] of payloadEntries) {
+                            console.log(
+                                "Trying device key:",
+                                deviceKey,
+                                "Payload:",
+                                ct
+                            );
+                            if (!ct || !ct.body) {
+                                console.log("No body in payload");
+                                continue;
+                            }
+
+                            const body = ensureArrayBuffer(ct.body);
+                            console.log("Body length:", body?.byteLength);
+
+                            // Determine sender info for session lookup
+                            const senderUserId = isFromUs
+                                ? otherUserId
+                                : messageSenderId;
+
+                            // Try each known sender device to find the correct session
+                            const trySenderDevices =
+                                otherUserDevices.length > 0
+                                    ? otherUserDevices
+                                    : [deviceKey];
+
+                            console.log(
+                                "Trying sender devices:",
+                                trySenderDevices,
+                                "for sender:",
+                                senderUserId
+                            );
+
+                            for (const sDev of trySenderDevices) {
+                                try {
+                                    const address =
+                                        new libsignal.SignalProtocolAddress(
+                                            String(senderUserId),
+                                            parseInt(sDev)
+                                        );
+                                    console.log(
+                                        "Trying address:",
+                                        address.toString()
+                                    );
+
+                                    const sessionCipher =
+                                        new libsignal.SessionCipher(
+                                            adiStore,
+                                            address
+                                        );
+                                    let plaintextBuf;
+                                    if (ct.type === 3) {
+                                        console.log(
+                                            "Decrypting PreKey message"
+                                        );
+                                        plaintextBuf =
+                                            await sessionCipher.decryptPreKeyWhisperMessage(
+                                                body,
+                                                "binary"
+                                            );
+                                    } else {
+                                        console.log(
+                                            "Decrypting regular message"
+                                        );
+                                        plaintextBuf =
+                                            await sessionCipher.decryptWhisperMessage(
+                                                body,
+                                                "binary"
+                                            );
+                                    }
+                                    const decoded = new TextDecoder().decode(
+                                        plaintextBuf
+                                    );
+                                    console.log(
+                                        "Successfully decrypted:",
+                                        decoded
+                                    );
+
+                                    msgStore.createMessage(
+                                        row.id,
+                                        chatID,
+                                        messageSenderId,
+                                        decoded,
+                                        "DELIVERED",
+                                        new Date(row.timestamp).getTime() ||
+                                            Date.now()
+                                    );
+                                    stored = true;
+                                    break;
+                                } catch (err) {
+                                    console.log(
+                                        "Decryption failed for device",
+                                        sDev,
+                                        ":",
+                                        err.message
+                                    );
+                                }
+                            }
+                            if (stored) break;
+                        }
+
+                        if (!stored) {
+                            console.log(
+                                "WARNING: Could not decrypt message",
+                                row.id
+                            );
+                        }
+                    }
+
+                    // Refresh UI from store
+                    setMessages(msgStore.getMessagesByChatId(chatID) || []);
+                } catch (e) {
+                    console.log("[history] failed to process messages", e);
+                }
             }
         };
 
@@ -658,13 +811,76 @@ export default function Messages() {
                         "device",
                         users[currentUser][j]
                     );
-                } else {
-                    console.log(
-                        "[INFO] Session found for user",
-                        currentUser,
-                        "device",
-                        users[currentUser][j]
+
+                    const sessionReq = await fetch(
+                        `http://localhost:8080/api/session/${currentUser}/${users[currentUser][j]}`,
+                        {
+                            method: "GET",
+                            headers: {
+                                "Content-Type": "application/json",
+                            },
+                            credentials: "include",
+                        }
                     );
+                    const sessionRes = await sessionReq.json();
+                    if (!sessionReq.ok) {
+                        console.log(
+                            "[ERROR] Could not fetch session prekey bundle"
+                        );
+                        return;
+                    }
+
+                    // Normalize bundle fields to ArrayBuffer as required by libsignal
+                    const bundle = {
+                        identityKey: ensureArrayBuffer(
+                            sessionRes.prekeyBundle.identityKey
+                        ),
+                        registrationId: sessionRes.prekeyBundle.registrationId,
+                        signedPreKey: {
+                            keyId: sessionRes.prekeyBundle.signedPreKey.keyId,
+                            publicKey: ensureArrayBuffer(
+                                sessionRes.prekeyBundle.signedPreKey.publicKey
+                            ),
+                            signature: ensureArrayBuffer(
+                                sessionRes.prekeyBundle.signedPreKey.signature
+                            ),
+                        },
+                        preKey: {
+                            keyId: sessionRes.prekeyBundle.preKey.keyId,
+                            publicKey: ensureArrayBuffer(
+                                sessionRes.prekeyBundle.preKey.publicKey
+                            ),
+                        },
+                    };
+
+                    const sessionBuilder = new libsignal.SessionBuilder(
+                        adiStore,
+                        address
+                    );
+
+                    try {
+                        await sessionBuilder.processPreKey(bundle);
+                    } catch (err) {
+                        if (
+                            err &&
+                            typeof err.message === "string" &&
+                            err.message.includes("Identity key changed")
+                        ) {
+                            console.warn(
+                                "[WARN] Identity key changed. Overwriting trusted identity for",
+                                address.toString()
+                            );
+                            // Update stored identity and retry once
+                            adiStore.saveIdentity(
+                                address.getName(),
+                                bundle.identityKey
+                            );
+                            adiStore.removeSession(address.toString());
+                            await sessionBuilder.processPreKey(bundle);
+                        } else {
+                            throw err;
+                        }
+                    }
                 }
                 const sessionCipher = new libsignal.SessionCipher(
                     adiStore,
@@ -709,7 +925,17 @@ export default function Messages() {
         }
 
         const res = await req.json();
-        console.log(res);
+
+        msgStore.createMessage(
+            res.message_id,
+            chatID,
+            userId,
+            message,
+            "SENT",
+            Date.now()
+        );
+        setMessages(msgStore.getMessagesByChatId(chatID) || []);
+        document.getElementById("message-input").value = "";
     };
 
     // Receive message
@@ -822,7 +1048,10 @@ export default function Messages() {
         const decoded = new TextDecoder().decode(plaintext);
         console.log("Decoded plaintext:", decoded);
         msgStore.incrementUnreadCount(msgChatId);
-        setMessages(msgStore.getMessagesByChatId(chatID) || []);
+        const currentMessages = msgStore.getMessagesByChatId(chatID) || [];
+        console.log("MSG ID = CHAT ID", chatID === msgChatId);
+        console.log("CURRENT MESSAGES:", currentMessages);
+        setMessages(currentMessages);
     };
 
     // Check if user is authenticated
@@ -1074,7 +1303,8 @@ export default function Messages() {
                                             <p>{msg.plaintext_content}</p>
                                         </div>
                                         <p className="time">
-                                            Me Doe - {formatChatDate(msg.timestamp)}
+                                            Me Doe -{" "}
+                                            {formatChatDate(msg.timestamp)}
                                         </p>
                                     </div>
                                 );
