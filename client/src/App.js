@@ -1,15 +1,15 @@
-import React from "react";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import "./App.css";
 
 import Auth from "./routes/auth/auth";
 import Messages from "./routes/messages/messages";
+import Index from "./routes/index/index";
 
 function App() {
     const router = createBrowserRouter([
         {
             path: "/",
-            element: <div>Hi!</div>,
+            element: <Index />,
         },
         {
             path: "/auth",

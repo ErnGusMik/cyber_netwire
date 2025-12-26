@@ -4,9 +4,12 @@
     --primary-color: #e8615a;
     --primary-color-dark: #9c3230;
     --primary-color-dark-xtra: #5d2322;
+    --primary-color-dark-xtra-x: #451717;
     --secondary-color: #2be4ea;
+    --secondary-color-rgb: 43, 228, 234;
     --secondary-color-dark: #295459;
     --tertiary-color: #fed33f;
+    --tertiary-color-rgb: 254, 211, 63;
 
     --background-gradient: linear-gradient(
             144deg,
@@ -15,6 +18,7 @@
         ),
         #191a1e;
     --background-color: #1e181e;
+    --background-color-dark: #191a1e;
     --background-color-red: #391419;
     --background-color-red-lighter: #451717;
 
@@ -23,6 +27,8 @@
 
     --text-shadow: -9px -6px 40px var(--primary-color);
     --text-shadow-secondary: -9px -6px 40px var(--secondary-color);
+    --hr-shadow: 0px 0px 10px 0px var(--primary-color);
+    --box-shadow: -9px -6px 30px var(--primary-color);
 
     --ui-notch-path: polygon(
         0 0,
@@ -31,6 +37,15 @@
         calc(100% - 17px) 100%,
         0 100%
     );
+    --ui-notch-both-path: polygon(
+        0 17px,
+        17px 0,
+        100% 0,
+        100% calc(100% - 17px),
+        calc(100% - 17px) 100%,
+        0 100%
+    );
+
     --ui-notch-hypotenuse: 24.04px;
 }
 
@@ -75,15 +90,19 @@ h3 {
 }
 
 .secondary {
-    color: var(--secondary-color);
+    color: var(--secondary-color) !important;
+}
+
+.text-shadow-secondary {
+    text-shadow: var(--text-shadow-secondary) !important;
 }
 
 .tertiary {
-    color: var(--tertiary-color);
+    color: var(--tertiary-color) !important;
 }
 
 .primary {
-    color: var(--primary-color);
+    color: var(--primary-color) !important;
 }
 
 .hr {
@@ -96,7 +115,7 @@ h3 {
 }
 
 .light {
-        font-weight: 500;
+    font-weight: 500;
 }
 
 .one-line {

@@ -6,8 +6,15 @@ import {
     getUserFromDisplayName,
     sendKey,
     checkIfUserExists,
-    checkIfUsersAreFriends,
+    fetchPrekeyBundle,
+    checkIfChatExists,
+    getAllActiveDevicesForUser,
+    getAllChatMembers,
+    getUserDisplayName,
 } from "../helpers/app.helpers.js";
+
+import { checkIfUserExists as checkIfUserExistsByEmail } from "../helpers/auth.helpers.js";
+import { sendToDevice } from "./messages.ws.js";
 
 const changeStatus = async (req, res, next) => {
     // Check if user is logged in
@@ -132,6 +139,8 @@ const newChat = async (req, res, next) => {
         pssw = await bcrypt.hash(req.body.password, salt);
     }
 
+    const creatorUser = await checkIfUserExistsByEmail(req.session.email);
+
     // Create chat
     const chat = await query(
         "INSERT INTO chats (chat_type, chat_name, disappearing, password, reports, description, discoverable) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
@@ -139,7 +148,18 @@ const newChat = async (req, res, next) => {
             req.body.chat_type !== undefined || req.body.chat_type !== null
                 ? req.body.chat_type
                 : 1,
-            req.body.chat_name ? req.body.chat_name : "New Chat",
+            req.body.chat_name
+                ? req.body.chat_name
+                : req.body.members.length == 1
+                ? "DM-" +
+                  req.body.members[0].display_name +
+                  "_" +
+                  req.body.members[0].user_no +
+                  "-" +
+                  creatorUser.display_name +
+                  "_" +
+                  creatorUser.user_no
+                : "New Chat",
             req.body.disappearing ? req.body.disappearing : 0,
             pssw,
             0,
@@ -157,26 +177,79 @@ const newChat = async (req, res, next) => {
     // Create random key
     const key = crypto.randomBytes(32);
 
+    // ! SIGNAL PROTOCOL VARIABLES
+    let bundles = [];
+    let user_ids = [];
+    let notFound = false;
+
     // Add & send key to all members
     for (let i = 0; i < req.body.members.length; i++) {
         const user = await getUserFromDisplayName(
             req.body.members[i].display_name,
             req.body.members[i].user_no
         );
+        if (!user || user.rowCount === 0) {
+            console.log("User not found, skipping:", req.body.members[i]);
+            notFound = true;
+            res.status(400).send({
+                error: `User ${req.body.members[i].display_name}#${req.body.members[i].user_no} does not exist`,
+            });
+            return;
+        }
         await query(
             "INSERT INTO chat_members (chat_id, user_id, joined_at) VALUES ($1, $2, $3)",
             [chat.rows[0].id, user.rows[0].id, new Date().toUTCString()]
         );
 
         await sendKey(key, user.rows[0].id, chat.rows[0].id, 1);
+
+        // ! SIGNAL PROTOCOL IMPLEMENTATION STARTS HERE
+        // Initial key exchange (X3DH)
+        // Fetch Prekey bundle
+        user_ids.push(user.rows[0].id);
+
+        const prekeyBundles = await fetchPrekeyBundle(user.rows[0].id);
+        if (prekeyBundles.length === 0 || prekeyBundles === null) {
+            res.status(500).send({
+                error: "Failed to fetch Prekey Bundle for Signal Protocol",
+            });
+            return;
+        }
+        console.log("Prekey Bundle fetched for user ID:", user.rows[0].id);
+        console.log(prekeyBundles);
+        // TODO: debugging this and then chatting (cannot read properties of undefined, reading bundles.push)
+        bundles.push({
+            user_id: user.rows[0].id,
+            bundles: prekeyBundles,
+        });
+        // ! SIGNAL PROTOCOL IMPLEMENTATION ENDS HERE
     }
+
+    if (notFound) return;
 
     // Send key to creator
     await sendKey(key, req.session.userID, chat.rows[0].id, 1);
 
+    // ! SIGNAL PROTOCOL IMPLEMENTATION STARTS HERE
+    // DMs initial key exchange
+    // Fetch Prekey bundle
+    // const prekeyBundle = await fetchPrekeyBundle(req.session.userID, req.body.device_id);
+    // if (prekeyBundle === null) {
+    //     res.status(500).send({
+    //         error: "Failed to fetch Prekey Bundle for Signal Protocol",
+    //     });
+    //     return;
+    // }
+    // console.log("Prekey Bundle fetched for user ID:", req.session.userID);
+    // console.log(prekeyBundle);
+    // ! SIGNAL PROTOCOL IMPLEMENTATION ENDS HERE
+
     res.status(201).send({
         chat_id: chat.rows[0].id,
+        userId: req.session.userID,
         csrfToken: csrf,
+        prekeyBundle: bundles,
+        recipientIds: user_ids,
     });
 };
 
@@ -316,10 +389,10 @@ const getChatMessages = async (req, res, next) => {
     const messages = await query(
         `SELECT
             m.id,
-            m.content,
+            m.ciphertext_payloads,
             m.timestamp,
             u.display_name,
-            u.user_no
+            u.id as user_no
         FROM
             messages m
         JOIN
@@ -334,6 +407,38 @@ const getChatMessages = async (req, res, next) => {
 
     res.status(200).send({
         messages: messages.rows,
+    });
+};
+
+const getChatDevices = async (req, res, next) => {
+    // Check if user is logged in
+    if (!req.session.email || req.session.loggedIn !== true) {
+        res.status(401).send({
+            error: "Invalid session. Have you logged in?",
+        });
+        return;
+    }
+
+    // Get chat devices
+    const devices = await query(
+        `SELECT
+            cd.device_id,
+            u.display_name,
+            u.id
+        FROM
+            chat_members cm
+        INNER JOIN
+            device_keys cd ON cm.user_id = cd.user_id
+        JOIN
+            "user" u ON cm.user_id = u.id
+        WHERE
+            cm.chat_id = $1;`,
+        [req.params.chat_id]
+    );
+
+    res.status(200).send({
+        devices: devices.rows,
+        userId: req.session.userID,
     });
 };
 
@@ -407,16 +512,21 @@ const postMessage = async (req, res, next) => {
         return;
     }
 
+    if (!req.body.content) {
+        res.status(400).send({
+            error: "Missing content or header data",
+        });
+        return;
+    }
+
     // Checks CSRF token
     const csrf = validateCSRFToken(req, res);
     if (!csrf) return;
 
     // Check if chat exists
-    const chat = await query("SELECT id FROM chats WHERE id = $1", [
-        req.params.chat_id,
-    ]);
+    const chat = await checkIfChatExists(req.params.chat_id);
 
-    if (chat.rowCount === 0) {
+    if (!chat) {
         res.status(400).send({
             error: "Chat does not exist",
         });
@@ -425,7 +535,7 @@ const postMessage = async (req, res, next) => {
 
     // Check if user is in chat
     const member = await query(
-        "SELECT id FROM chat_members WHERE chat_id = $1 AND user_id = $2",
+        "SELECT * FROM chat_members WHERE chat_id = $1 AND user_id = $2",
         [req.params.chat_id, req.session.userID]
     );
 
@@ -437,19 +547,81 @@ const postMessage = async (req, res, next) => {
     }
 
     // Post message
-    await query(
-        "INSERT INTO messages (chat_id, sender_id, content, timestamp) VALUES ($1, $2, $3, $4)",
+    const msgId = await query(
+        "INSERT INTO messages (chat_id, sender_id, ciphertext_payloads, timestamp) VALUES ($1, $2, $3, $4) RETURNING id",
         [
             req.params.chat_id,
             req.session.userID,
             req.body.content,
             new Date().toUTCString(),
+            // req.body.header_data,
         ]
     );
 
+    const members = await getAllChatMembers(req.params.chat_id);
+    const displayName = await getUserDisplayName(req.session.userID);
+
+    for (let i = 0; i < members.length; i++) {
+        if (members[i] === req.session.userID) {
+            continue;
+        }
+        const deviceIds = await getAllActiveDevicesForUser(members[i]);
+        deviceIds.forEach((deviceId) => {
+            const sent = sendToDevice(members[i], deviceId, {
+                type: "new_message",
+                chat_id: req.params.chat_id,
+                sender_id: req.session.userID + ":" + req.session.deviceId,
+                ciphertext: req.body.content[deviceId],
+                message_id: msgId.rows[0].id,
+                senderName: displayName,
+            });
+            console.log(sent);
+        });
+    }
+
     res.status(201).send({
         csrfToken: csrf,
+        message_id: msgId.rows[0].id,
     });
+};
+
+const getSessionData = async (req, res, next) => {
+    // Check if user is logged in
+    if (!req.session.email || req.session.loggedIn !== true) {
+        res.status(401).send({
+            error: "Invalid session. Have you logged in?",
+        });
+        return;
+    }
+
+    if (!req.params.userId || !req.params.deviceId) {
+        res.status(400).send({
+            error: "Missing userId or deviceId",
+        });
+        return;
+    }
+
+    // Fetch Prekey bundle
+    const prekeyBundles = await fetchPrekeyBundle(req.params.userId);
+    if (prekeyBundles === null || prekeyBundles.length === 0) {
+        res.status(404).send({
+            error: "Failed to fetch Prekey Bundle for Signal Protocol",
+        });
+        return;
+    }
+
+    const bundle = prekeyBundles.find((b => b.deviceId.toString() === req.params.deviceId.toString()));
+    if (!bundle) {
+        res.status(404).send({
+            error: "Prekey Bundle for specified device not found",
+        });
+        return;
+    }
+
+    res.status(200).send({
+        prekeyBundle: bundle
+    });
+
 };
 
 export {
@@ -462,4 +634,6 @@ export {
     getChatMessages,
     postMessage,
     getChatKey,
+    getChatDevices,
+    getSessionData,
 };

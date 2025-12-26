@@ -12,7 +12,7 @@
 
 .messages .main {
     margin: 0 40px;
-    max-width: 60%;
+    width: 60%;
 }
 
 /* SIDEBAR */
@@ -90,6 +90,13 @@
     text-decoration: none;
 }
 
+.messages .no-chats {
+    padding: 15px 5px;
+    color: var(--tertiary-color);
+    font-size: 0.9rem;
+    text-align: center;
+}
+
 .messages .section-item:hover,
 .messages .section-item.active {
     border: 1px solid var(--primary-color-dark);
@@ -139,6 +146,7 @@
 
 .messages .main {
     position: relative;
+    height: 100%;
 }
 
 .messages .main .main-head {
@@ -202,6 +210,16 @@
     margin: 10px 0;
 }
 
+.messages .main .chat {
+    overflow-y: auto;
+    margin-bottom: 100px;
+    height: calc(100% - 150px);
+}
+
+.messages .main .chat::-webkit-scrollbar {
+    width: 0;
+}
+
 .messages .main .message {
     margin: 20px 0;
 }
@@ -252,28 +270,34 @@
 }
 
 /* SCROLL */
-.messages textarea::-webkit-scrollbar, .messages .sidebar-outer::-webkit-scrollbar {
+.messages textarea::-webkit-scrollbar,
+.messages .sidebar-outer::-webkit-scrollbar {
     width: 5px;
     height: 5px;
 }
 
-.messages textarea::-webkit-scrollbar-track, .messages .sidebar-outer::-webkit-scrollbar-track {
+.messages textarea::-webkit-scrollbar-track,
+.messages .sidebar-outer::-webkit-scrollbar-track {
     background: transparent;
 }
 
-.messages textarea::-webkit-scrollbar-thumb, .messages .sidebar-outer::-webkit-scrollbar-thumb {
+.messages textarea::-webkit-scrollbar-thumb,
+.messages .sidebar-outer::-webkit-scrollbar-thumb {
     background: #888;
 }
 
-.messages textarea::-webkit-scrollbar-thumb:hover, .messages .sidebar-outer::-webkit-scrollbar:hover {
+.messages textarea::-webkit-scrollbar-thumb:hover,
+.messages .sidebar-outer::-webkit-scrollbar:hover {
     background: #555;
 }
 
-.messages textarea::-webkit-scrollbar-button, .messages .sidebar-outer::-webkit-scrollbar-button {
+.messages textarea::-webkit-scrollbar-button,
+.messages .sidebar-outer::-webkit-scrollbar-button {
     display: none;
 }
 
-.messages textarea::-webkit-scrollbar-corner, .messages .sidebar-outer::-webkit-scrollbar-corner {
+.messages textarea::-webkit-scrollbar-corner,
+.messages .sidebar-outer::-webkit-scrollbar-corner {
     display: none;
 }
 
@@ -468,5 +492,33 @@
 @keyframes rotate16 {
     to {
         transform: rotate(360deg);
+    }
+}
+
+/* SMALL SCREEN OVERLAY */
+.small-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--background-gradient);
+    z-index: 100;
+    justify-content: center;
+    align-items: center;
+    display: flex;
+    flex-direction: column;
+    display: none;
+}
+
+.small-overlay p {
+    font-size: 24px;
+    text-align: center;
+    max-width: 300px;
+    margin-bottom: 20px;
+}
+@media only screen and (max-width: 850px) {
+    .small-overlay {
+        display: flex;
     }
 }

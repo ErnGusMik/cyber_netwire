@@ -16,9 +16,9 @@ pool.on('error', (err, client) => {
 
 
 const query = async (text, params) => {
-    const client = await pool.connect()
+    // const client = await pool.connect()
     const res =  await pool.query(text, params)
-    client.release();
+    // client.release();
     return res;
 }
 

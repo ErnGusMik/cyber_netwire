@@ -8,7 +8,12 @@ import Input from "../../components/input/input";
 import Profile from "../../components/profile/profile";
 import Boolean from "../../components/boolean/boolean";
 import { useNavigate, NavLink, useParams } from "react-router-dom";
-import { type } from "@testing-library/user-event/dist/type";
+import adiStore from "../../adiStore";
+import msgStore from "../../msgStore";
+import logout from "../../helpers/logout.helper";
+
+import * as libsignal from "@privacyresearch/libsignal-protocol-typescript";
+import openSocket from "./ws";
 
 function useAuth() {
     const navigate = useNavigate();
@@ -38,13 +43,133 @@ export default function Messages() {
     const [more, setMore] = React.useState(false);
     const [newChatError, setNewChatError] = React.useState("");
     const [chatKey, setChatKey] = React.useState();
+    const [userId, setUserId] = React.useState(0);
     const { chatID } = useParams();
+
+    const [messages, setMessages] = React.useState(
+        msgStore.getMessagesByChatId(chatID) || []
+    );
 
     // Crypto helper function
     function hexToUint8Array(hexString) {
         return new Uint8Array(
             hexString.match(/../g).map((h) => parseInt(h, 16))
         ).buffer;
+    }
+
+    // Browser: base64 -> ArrayBuffer
+    function isBase64String(str) {
+        if (typeof str !== "string") return false;
+        // Basic check: only valid base64 chars and proper padding
+        if (str.length % 4 !== 0) return false;
+        return !/[^A-Za-z0-9+/=\n\r]/.test(str);
+    }
+
+    function base64ToArrayBuffer(base64) {
+        // Accept ArrayBuffer / TypedArray directly
+        if (!base64) return base64;
+        if (base64 instanceof ArrayBuffer) return base64;
+        if (ArrayBuffer.isView(base64)) return base64.buffer;
+
+        // If it's not a string, try to coerce binary-string-like inputs
+        if (typeof base64 !== "string") {
+            const u8 = new Uint8Array(base64.length || 0);
+            for (let i = 0; i < u8.length; i++) u8[i] = base64[i] & 0xff;
+            return u8.buffer;
+        }
+
+        // If it looks like base64, decode using atob
+        if (isBase64String(base64)) {
+            // try {
+            //     const binary = atob(base64.replace(/\s+/g, ""));
+            //     const len = binary.length;
+            //     const bytes = new Uint8Array(len);
+            //     for (let i = 0; i < len; i++)
+            //         bytes[i] = binary.charCodeAt(i) & 0xff;
+            //     return bytes.buffer;
+            // } catch (e) {
+            //     // fall through to binary-string fallback
+            // }
+            if (!base64) return null;
+            if (base64 instanceof ArrayBuffer) return base64;
+
+            if (ArrayBuffer.isView(base64)) {
+                return base64.buffer.slice(
+                    base64.byteOffset,
+                    base64.byteOffset + base64.byteLength
+                );
+            }
+
+            if (typeof base64 !== "string") {
+                return new Uint8Array(base64).buffer;
+            }
+
+            try {
+                // Remove whitespace which can be introduced by DBs or JSON formatting
+                const sanitized = base64.replace(/\s+/g, "");
+                const binary = atob(sanitized);
+                const len = binary.length;
+                const bytes = new Uint8Array(len);
+
+                for (let i = 0; i < len; i++) {
+                    // & 0xff ensures we strictly keep the 8-bit byte value
+                    bytes[i] = binary.charCodeAt(i) & 0xff;
+                }
+
+                return bytes.buffer;
+            } catch (e) {
+                console.error(
+                    "base64ToArrayBuffer: Failed to decode string.",
+                    e
+                );
+                return null;
+            }
+        }
+
+        // Fallback: treat input as a binary string where each char code is a byte
+        const u8 = new Uint8Array(base64.length);
+        for (let i = 0; i < base64.length; i++)
+            u8[i] = base64.charCodeAt(i) & 0xff;
+        return u8.buffer;
+    }
+
+    // Accept either a base64 string or a BufferSource and return an ArrayBuffer
+    function ensureArrayBuffer(input) {
+        if (!input) return input;
+        if (typeof input === "string") return base64ToArrayBuffer(input);
+        if (input instanceof ArrayBuffer) return input;
+        if (ArrayBuffer.isView(input)) return input.buffer;
+        // object with { data: [...] }
+        if (input && typeof input === "object" && Array.isArray(input.data))
+            return new Uint8Array(input.data).buffer;
+        return input;
+    }
+
+    // Browser: arrayBuffer -> base64 (chunked to avoid stack issues)
+    function arrayBufferToBase64(arrayBuffer) {
+        let bytes;
+        if (ArrayBuffer.isView(arrayBuffer)) {
+            // Use the specific slice defined by the view
+            bytes = new Uint8Array(
+                arrayBuffer.buffer,
+                arrayBuffer.byteOffset,
+                arrayBuffer.byteLength
+            );
+        } else {
+            bytes = new Uint8Array(arrayBuffer);
+        }
+
+        const chunkSize = 0x8000; // 32KB chunks
+        let binary = "";
+
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+            // Chunking prevents "Maximum call stack size exceeded"
+            binary += String.fromCharCode.apply(
+                null,
+                bytes.subarray(i, i + chunkSize)
+            );
+        }
+        return btoa(binary);
     }
 
     // Handle new chat creation
@@ -62,7 +187,7 @@ export default function Messages() {
             const feed_passw =
                 document.getElementById("feed-passw-input").value;
 
-            const req = await fetch("http://localhost:8080/api/chat/new", {
+            const req = await fetch("http://api.ernestsgm.com/api/chat/new", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -91,6 +216,7 @@ export default function Messages() {
                 console.log("[ERROR] Could not create feed");
                 console.log(req.error);
                 const res = await req.json();
+                if (req.status === 401) logout();
                 setNewChatError(res.error);
             }
             return;
@@ -100,7 +226,7 @@ export default function Messages() {
         const username = document.getElementById("username-input").value;
         const user_no = document.getElementById("user-no-input").value;
 
-        const req = await fetch("http://localhost:8080/api/chat/new", {
+        const req = await fetch("http://api.ernestsgm.com/api/chat/new", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -123,16 +249,130 @@ export default function Messages() {
         });
 
         const res = await req.json();
-        console.log(res);
         if (!req.ok) {
             console.log("[ERROR] Could not create chat");
             console.log(res.error);
             setNewChatError(res.error);
+            if (req.status === 401) logout();
             return;
-        } else {
-            document.querySelector(".add-overlay").style.display = "none";
-            return navigate("/app/msg/" + res.chat_id);
         }
+
+        // ! SIGNAL PROTOCOL IMPLEMENTATION STARTS HERE
+        // New chat flow (X3DH key exchange + Diffie-Hellman ratchet init)
+
+        if (res.prekeyBundle.length !== 1) {
+            console.log("[ERROR] Chat type and user count mismatch");
+        }
+
+        let initial_ciphertexts = {};
+
+        // Store chat info locally
+        msgStore.createChat(res.chat_id, username, res.recipientIds[0]);
+
+        for (let i = 0; i < res.prekeyBundle[0].bundles.length; i++) {
+            const resBundle = res.prekeyBundle[0].bundles[i];
+            const bundle = {
+                identityKey: ensureArrayBuffer(resBundle.identityKey),
+                signedPreKey: {
+                    keyId: resBundle.signedPreKey.keyId,
+                    publicKey: ensureArrayBuffer(
+                        resBundle.signedPreKey.publicKey
+                    ),
+                    signature: ensureArrayBuffer(
+                        resBundle.signedPreKey.signature
+                    ),
+                },
+                preKey: {
+                    keyId: resBundle.preKey.keyId,
+                    publicKey: ensureArrayBuffer(resBundle.preKey.publicKey),
+                },
+                registrationId: resBundle.registrationId,
+            };
+            console.log("Bundle received:", bundle);
+
+            // 2. Create SignalProtocolAddress for the other user
+            const address = new libsignal.SignalProtocolAddress(
+                res.recipientIds[0].toString(),
+                resBundle.deviceId
+            );
+
+            console.log("Address created:", address);
+
+            // 3. Create session builder
+            const sessionBuilder = new libsignal.SessionBuilder(
+                adiStore,
+                address
+            );
+
+            // 4. Process prekey bundle to establish session
+            const session = await sessionBuilder.processPreKey(bundle);
+
+            // 5. Create session cipher
+            const sessionCipher = new libsignal.SessionCipher(
+                adiStore,
+                address
+            );
+            const ciphertext = await sessionCipher.encrypt(
+                Uint8Array.from([0, 0, 0, 0]).buffer
+            );
+
+            const base64Body = arrayBufferToBase64(
+                ensureArrayBuffer(ciphertext.body)
+            );
+
+            initial_ciphertexts[resBundle.deviceId] = {
+                type: ciphertext.type,
+                body: base64Body,
+                registrationId: ciphertext.registrationId,
+            };
+
+            msgStore.addDeviceForChatUser(
+                res.chat_id,
+                res.recipientIds[0],
+                resBundle.deviceId
+            );
+        }
+
+        // Post initial message
+        const postReq = await fetch(
+            `http://api.ernestsgm.com/api/chat/${res.chat_id}/post`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRF-Token": document.cookie
+                        .split("; ")
+                        .find((row) => row.startsWith("csrf-token"))
+                        .split("=")[1],
+                },
+                credentials: "include",
+                body: JSON.stringify({
+                    content: initial_ciphertexts,
+                }),
+            }
+        );
+
+        const postRes = await postReq.json();
+        if (postReq.status === 401) logout();
+        if (!postReq.ok) {
+            console.log("[ERROR] Could not post initial message");
+            console.log(postRes.error);
+            return;
+        }
+
+        msgStore.createMessage(
+            postRes.message_id,
+            res.chat_id,
+            userId,
+            "You started a secure session with this user.",
+            "PREKEY_MSG_SENT",
+            Date.now(),
+            "System"
+        );
+
+        // Redirect to new chat
+        document.querySelector(".add-overlay").style.display = "none";
+        return navigate("/app/msg/" + res.chat_id);
     };
 
     // On dropdown click
@@ -168,7 +408,7 @@ export default function Messages() {
     const loadData = async () => {
         // Fetch chats
         const chats = async () => {
-            const req = await fetch("http://localhost:8080/api/chat/all", {
+            const req = await fetch("http://api.ernestsgm.com/api/chat/all", {
                 method: "GET",
                 headers: {
                     "Content-Type": "application/json",
@@ -183,13 +423,22 @@ export default function Messages() {
             }
 
             const res = await req.json();
-            console.log(res.chats);
             setChats(res.chats);
+
+            for (let i = 0; i < res.chats.length; i++) {
+                msgStore.createChat(
+                    res.chats[i].chat_id,
+                    res.chats[i].chat_type == 0
+                        ? res.chats[i].other_user_name
+                        : res.chats[i].chat_name,
+                    res.chats[i].other_user_id
+                );
+            }
         };
 
         // Fetch friends
         const friends = async () => {
-            const req = await fetch("http://localhost:8080/api/friends/all", {
+            const req = await fetch("http://api.ernestsgm.com/api/friends/all", {
                 method: "GET",
                 headers: {
                     "Content-Type": "application/json",
@@ -210,7 +459,7 @@ export default function Messages() {
 
         // Fetch public key SHA1 hash (decorative purposes :D)
         const pubKey = async () => {
-            const req = await fetch("http://localhost:8080/api/public-key", {
+            const req = await fetch("http://api.ernestsgm.com/api/public-key", {
                 method: "GET",
                 headers: {
                     "Content-Type": "application/json",
@@ -231,8 +480,41 @@ export default function Messages() {
         const chat = async () => {
             console.log(chatID);
             if (chatID) {
+                const deviceReq = await fetch(
+                    `http://api.ernestsgm.com/api/chat/${chatID}/devices`,
+                    {
+                        method: "GET",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        credentials: "include",
+                    }
+                );
+
+                const deviceRes = await deviceReq.json();
+
+                if (!deviceReq.ok) {
+                    if (deviceReq.status === 401) {
+                        localStorage.removeItem("isAuthenticated");
+                        navigate("/auth?redirect=app/msg/");
+                    }
+                    console.log("[ERROR] Could not fetch chat devices");
+                    console.log(deviceRes.error);
+                    return;
+                }
+                setUserId(deviceRes.userId);
+                for (let i = 0; i < deviceRes.devices.length; i++) {
+                    if (deviceRes.devices[i].id !== deviceRes.userId) {
+                        msgStore.addDeviceForChatUser(
+                            chatID,
+                            deviceRes.devices[i].id,
+                            deviceRes.devices[i].device_id
+                        );
+                    }
+                }
+
                 const req = await fetch(
-                    `http://localhost:8080/api/chat/${chatID}/messages/15`,
+                    `http://api.ernestsgm.com/api/chat/${chatID}/messages/15`,
                     {
                         method: "GET",
                         headers: {
@@ -249,51 +531,110 @@ export default function Messages() {
                         navigate("/auth?redirect=app/msg/");
                     }
                 }
-                console.log(res);
-            }
-        };
 
-        const chatKey = async () => {
-            if (chatID) {
-                const req = await fetch(
-                    `http://localhost:8080/api/chat/${chatID}/key/latest`,
-                    {
-                        method: "GET",
-                        headers: {
-                            "Content-Type": "application/json",
-                        },
-                        credentials: "include",
-                    }
-                );
+                try {
+                    const otherUserId =
+                        (deviceRes.devices || [])
+                            .map((d) => d.id)
+                            .find((id) => id !== deviceRes.userId) || null;
 
-                const res = await req.json();
-                if (!req.ok) {
-                    if (req.status === 401) {
-                        localStorage.removeItem("isAuthenticated");
-                        navigate("/auth?redirect=app/msg/");
-                    }
-                }
-                console.log(res);
+                    const otherUserDevices = otherUserId
+                        ? msgStore.getDeviceIdsForChatUser(chatID, otherUserId)
+                        : [];
 
-                // try {
-                const key = hexToUint8Array(res.key);
-                if ("serviceWorker" in navigator) {
-                    navigator.serviceWorker.controller.postMessage({
-                        type: "decrypt",
-                        ciphertext: key,
-                    });
-                    navigator.serviceWorker.onmessage = (event) => {
-                        if (event.data.status === "success") {
-                            console.log(event.data.plaintext);
-                        } else if (event.data.status === "decryptionError") {
-                            console.log(event.data.error);
+                    for (const row of res.messages || []) {
+                        if (msgStore.getMessage(row.id)) continue;
+
+                        const payloads = row.ciphertext_payloads || {};
+                        const payloadEntries = Object.entries(payloads);
+
+                        const messageSenderId = row.user_no;
+                        const isFromUs = messageSenderId === deviceRes.userId;
+
+                        let stored = false;
+                        for (const [deviceKey, ct] of payloadEntries) {
+                            if (!ct || !ct.body) {
+                                console.log("No body in payload");
+                                continue;
+                            }
+
+                            const body = ensureArrayBuffer(ct.body);
+                            const senderUserId = isFromUs
+                                ? otherUserId
+                                : messageSenderId;
+
+                            const trySenderDevices =
+                                otherUserDevices.length > 0
+                                    ? otherUserDevices
+                                    : [deviceKey];
+
+                            for (const sDev of trySenderDevices) {
+                                try {
+                                    const address =
+                                        new libsignal.SignalProtocolAddress(
+                                            String(senderUserId),
+                                            parseInt(sDev)
+                                        );
+
+                                    const sessionCipher =
+                                        new libsignal.SessionCipher(
+                                            adiStore,
+                                            address
+                                        );
+                                    let plaintextBuf;
+                                    if (ct.type === 3) {
+                                        plaintextBuf =
+                                            await sessionCipher.decryptPreKeyWhisperMessage(
+                                                body,
+                                                "binary"
+                                            );
+                                    } else {
+                                        plaintextBuf =
+                                            await sessionCipher.decryptWhisperMessage(
+                                                body,
+                                                "binary"
+                                            );
+                                    }
+                                    const decoded = new TextDecoder().decode(
+                                        plaintextBuf
+                                    );
+
+                                    msgStore.createMessage(
+                                        row.id,
+                                        chatID,
+                                        messageSenderId,
+                                        decoded,
+                                        "DELIVERED",
+                                        new Date(row.timestamp).getTime() ||
+                                            Date.now()
+                                    );
+                                    stored = true;
+                                    break;
+                                } catch (err) {
+                                    console.log(
+                                        "Decryption failed for device",
+                                        sDev,
+                                        ":",
+                                        err.message
+                                    );
+                                }
+                            }
+                            if (stored) break;
                         }
-                    };
+
+                        if (!stored) {
+                            console.log(
+                                "WARNING: Could not decrypt message",
+                                row.id
+                            );
+                        }
+                    }
+
+                    // Refresh UI from store
+                    setMessages(msgStore.getMessagesByChatId(chatID) || []);
+                } catch (e) {
+                    console.log("[history] failed to process messages", e);
                 }
-                // } catch (e) {
-                // console.log(e);
-                // }
-                setChatKey(res.key);
             }
         };
 
@@ -301,7 +642,8 @@ export default function Messages() {
         await friends();
         await pubKey();
         await chat();
-        await chatKey();
+        // await chatKey();
+        openSocket(receiveMessage);
     };
 
     // Handle loading animation
@@ -322,15 +664,169 @@ export default function Messages() {
         final();
     }, []);
 
+    // Reload chat data on chatID change (not only on page reload)
+    React.useEffect(() => {
+        if (chatID && loaded) {
+            // Scroll to bottom of chat
+            setTimeout(() => {
+                const chatElement = document.querySelector(".chat");
+                if (chatElement) {
+                    chatElement.scrollTop = chatElement.scrollHeight;
+                }
+            }, 0);
+            loadData();
+        }
+    }, [chatID, loaded]);
+
+    // Scroll to bottom on new message
+    React.useEffect(() => {
+        const chatElement = document.querySelector(".chat");
+        if (chatElement) chatElement.scrollTop = chatElement.scrollHeight;
+    }, [messages]);
+
+    // Send message on Enter (but allow Shift+Enter for newline)
+    React.useEffect(() => {
+        const inputEl = document.getElementById("message-input");
+        if (!inputEl) return;
+
+        const handleKeyDown = (e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                postMessage();
+            }
+        };
+
+        inputEl.addEventListener("keydown", handleKeyDown);
+        return () => inputEl.removeEventListener("keydown", handleKeyDown);
+    }, [chatID, loaded]);
+
     // Post message
     const postMessage = async () => {
         if (!chatID) {
             return;
         }
         const message = document.getElementById("message-input").value;
+        document.getElementById("message-input").value = "";
+        if (message.trim() === "") {
+            console.log("[ERROR] Cannot send empty message");
+            return;
+        }
+        // ! SIGNAL PROTOCOL IMPLEMENTATION STARTS HERE
+        // Message sending flow (Diffie-Hellman ratchet)
+        // Set up encryption
+        const users = msgStore.getAllDeviceIdsForChat(chatID);
+        if (!users || Object.keys(users).length === 0) {
+            console.log("[ERROR] No users/devices found for chat");
+            return;
+        }
+        const buffer = new TextEncoder().encode(message).buffer;
+        let ciphertexts = {};
+        for (let i = 0; i < Object.keys(users).length; i++) {
+            for (let j = 0; j < users[Object.keys(users)[i]].length; j++) {
+                const currentUser = Object.keys(users)[i];
+                const address = new libsignal.SignalProtocolAddress(
+                    currentUser.toString(),
+                    users[currentUser][j]
+                );
+                const hasSession = await adiStore.loadSession(
+                    address.toString()
+                );
+                if (!hasSession) {
+                    console.log(
+                        "[ERROR] No session found for user",
+                        currentUser,
+                        "device",
+                        users[currentUser][j]
+                    );
+
+                    const sessionReq = await fetch(
+                        `http://api.ernestsgm.com/api/session/${currentUser}/${users[currentUser][j]}`,
+                        {
+                            method: "GET",
+                            headers: {
+                                "Content-Type": "application/json",
+                            },
+                            credentials: "include",
+                        }
+                    );
+                    const sessionRes = await sessionReq.json();
+                    if (!sessionReq.ok) {
+                        console.log(
+                            "[ERROR] Could not fetch session prekey bundle"
+                        );
+                        return;
+                    }
+
+                    // Normalize bundle fields to ArrayBuffer as required by libsignal
+                    const bundle = {
+                        identityKey: ensureArrayBuffer(
+                            sessionRes.prekeyBundle.identityKey
+                        ),
+                        registrationId: sessionRes.prekeyBundle.registrationId,
+                        signedPreKey: {
+                            keyId: sessionRes.prekeyBundle.signedPreKey.keyId,
+                            publicKey: ensureArrayBuffer(
+                                sessionRes.prekeyBundle.signedPreKey.publicKey
+                            ),
+                            signature: ensureArrayBuffer(
+                                sessionRes.prekeyBundle.signedPreKey.signature
+                            ),
+                        },
+                        preKey: {
+                            keyId: sessionRes.prekeyBundle.preKey.keyId,
+                            publicKey: ensureArrayBuffer(
+                                sessionRes.prekeyBundle.preKey.publicKey
+                            ),
+                        },
+                    };
+
+                    const sessionBuilder = new libsignal.SessionBuilder(
+                        adiStore,
+                        address
+                    );
+
+                    try {
+                        await sessionBuilder.processPreKey(bundle);
+                    } catch (err) {
+                        if (
+                            err &&
+                            typeof err.message === "string" &&
+                            err.message.includes("Identity key changed")
+                        ) {
+                            console.warn(
+                                "[WARN] Identity key changed. Overwriting trusted identity for",
+                                address.toString()
+                            );
+                            // Update stored identity and retry once
+                            adiStore.saveIdentity(
+                                address.getName(),
+                                bundle.identityKey
+                            );
+                            adiStore.removeSession(address.toString());
+                            await sessionBuilder.processPreKey(bundle);
+                        } else {
+                            throw err;
+                        }
+                    }
+                }
+                const sessionCipher = new libsignal.SessionCipher(
+                    adiStore,
+                    address
+                );
+                const ciphertext = await sessionCipher.encrypt(buffer);
+                const base64Body = arrayBufferToBase64(
+                    ensureArrayBuffer(ciphertext.body)
+                );
+                ciphertexts[users[currentUser][j]] = {
+                    type: ciphertext.type,
+                    body: base64Body,
+                    registrationId: ciphertext.registrationId,
+                };
+            }
+        }
 
         const req = await fetch(
-            `http://localhost:8080/api/chat/${chatID}/message`,
+            `http://api.ernestsgm.com/api/chat/${chatID}/post`,
             {
                 method: "POST",
                 headers: {
@@ -342,7 +838,7 @@ export default function Messages() {
                 },
                 credentials: "include",
                 body: JSON.stringify({
-                    message: message,
+                    content: ciphertexts,
                 }),
             }
         );
@@ -353,7 +849,130 @@ export default function Messages() {
         }
 
         const res = await req.json();
-        console.log(res);
+
+        msgStore.createMessage(
+            res.message_id,
+            chatID,
+            userId,
+            message,
+            "SENT",
+            Date.now(),
+            "You"
+        );
+        setMessages(msgStore.getMessagesByChatId(chatID) || []);
+    };
+
+    // Receive message
+    const receiveMessage = async (
+        message,
+        msgChatId,
+        senderId,
+        senderDeviceId,
+        messageId,
+        senderName
+    ) => {
+        const address = new libsignal.SignalProtocolAddress(
+            senderId.toString(),
+            senderDeviceId
+        );
+
+        const sessionCipher = new libsignal.SessionCipher(adiStore, address);
+
+        let plaintext;
+        if (message.type === 3) {
+            try {
+                const binaryText = ensureArrayBuffer(message.body);
+                console.log("PreKey MESSAGE LENGTH:", binaryText.byteLength);
+                plaintext = await sessionCipher.decryptPreKeyWhisperMessage(
+                    binaryText,
+                    "binary"
+                );
+                const chatReq = await fetch(
+                    "http://api.ernestsgm.com/api/chat/all",
+                    {
+                        method: "GET",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        credentials: "include",
+                    }
+                );
+
+                if (!chatReq.ok) {
+                    localStorage.removeItem("isAuthenticated");
+                    navigate("/auth?redirect=app/msg");
+                    return false;
+                }
+
+                const chatres = await chatReq.json();
+                setChats(chatres.chats);
+
+                for (let i = 0; i < chatres.chats.length; i++) {
+                    msgStore.createChat(
+                        chatres.chats[i].chat_id,
+                        chatres.chats[i].chat_type == 0
+                            ? chatres.chats[i].other_user_name
+                            : chatres.chats[i].chat_name,
+                        chatres.chats[i].other_user_id
+                    );
+                }
+
+                if (
+                    new TextDecoder().decode(plaintext) ==
+                    new TextDecoder().decode(
+                        Uint8Array.from([0, 0, 0, 0]).buffer
+                    )
+                ) {
+                    msgStore.createMessage(
+                        messageId,
+                        msgChatId,
+                        senderId,
+                        "A secure session has been established with this user.",
+                        "PREKEY_RECEIVED",
+                        Date.now(),
+                        "System"
+                    );
+                } else {
+                    msgStore.createMessage(
+                        messageId,
+                        msgChatId,
+                        senderId,
+                        new TextDecoder().decode(plaintext),
+                        "PREKEY_MSG_RECEIVED",
+                        Date.now(),
+                        senderName
+                    );
+                }
+            } catch (e) {
+                console.log("PreKey decryption error:", e);
+            }
+        } else if (message.type === 1) {
+            try {
+                const binaryText = ensureArrayBuffer(message.body);
+
+                plaintext = await sessionCipher.decryptWhisperMessage(
+                    binaryText,
+                    "binary"
+                );
+
+                msgStore.incrementUnreadCount(msgChatId);
+                msgStore.createMessage(
+                    messageId,
+                    msgChatId,
+                    senderId,
+                    new TextDecoder().decode(plaintext),
+                    "DELIVERED",
+                    Date.now(),
+                    senderName
+                );
+            } catch (e) {
+                console.log("Whisper decryption error:", e);
+            }
+        }
+        const decoded = new TextDecoder().decode(plaintext);
+        msgStore.incrementUnreadCount(msgChatId);
+        const currentMessages = msgStore.getMessagesByChatId(chatID) || [];
+        setMessages(currentMessages);
     };
 
     // Check if user is authenticated
@@ -361,6 +980,40 @@ export default function Messages() {
     if (!isAuthenticated) {
         return null;
     }
+
+    const formatChatDate = (dateInput) => {
+        const date = new Date(dateInput);
+        const now = new Date();
+
+        const isToday =
+            date.getDate() === now.getDate() &&
+            date.getMonth() === now.getMonth() &&
+            date.getFullYear() === now.getFullYear();
+
+        if (isToday) {
+            return date.toLocaleTimeString("en-GB", {
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: false,
+            });
+        } else {
+            const yesterday = new Date();
+            yesterday.setDate(now.getDate() - 1);
+
+            const isYesterday =
+                date.getDate() === yesterday.getDate() &&
+                date.getMonth() === yesterday.getMonth() &&
+                date.getFullYear() === yesterday.getFullYear();
+
+            if (isYesterday) return "Yesterday";
+
+            return date.toLocaleDateString("en-GB", {
+                day: "2-digit",
+                month: "2-digit",
+                year: "numeric",
+            });
+        }
+    };
 
     return (
         <div className="messages-cont">
@@ -395,7 +1048,7 @@ export default function Messages() {
                             <h3 className="secondary bold section-header section-item">
                                 Feeds
                             </h3>
-                            <p className="section-item secondary bold active">
+                            {/* <p className="section-item secondary bold active">
                                 <span className="list">#</span> Watson
                                 <span className="msg-count">2</span>
                             </p>
@@ -409,7 +1062,17 @@ export default function Messages() {
                                 <span className="list">#</span>{" "}
                                 T_SQUAD_Netrunners
                                 <span className="msg-count">3</span>
-                            </p>
+                            </p> */}
+                            {chats.filter((chat) => chat.chat_type === 1)
+                                .length === 0 && (
+                                <p className="no-chats">
+                                    No feed channels yet. Create one! (coming
+                                    soon)
+                                </p>
+                            )}
+                            {/* <p className="no-chats">
+                                No feed channels yet. Create one! (coming soon)
+                            </p> */}
                             {chats.map((chat) => {
                                 if (chat.chat_type === 1) {
                                     return (
@@ -445,7 +1108,7 @@ export default function Messages() {
                                 Direct
                             </h3>
                             <ul>
-                                <li className="section-item secondary bold">
+                                {/* <li className="section-item secondary bold">
                                     <span className="list status online" />
                                     Person 1<span className="msg-count">2</span>
                                 </li>
@@ -457,7 +1120,14 @@ export default function Messages() {
                                 <li className="section-item secondary">
                                     <span className="list status offline" />
                                     Person 3
-                                </li>
+                                </li> */}
+                                {chats.filter((chat) => chat.chat_type === 0)
+                                    .length === 0 && (
+                                    <p className="no-chats">
+                                        No DM channels yet. Create one! (coming
+                                        soon)
+                                    </p>
+                                )}
                                 {chats.map((chat) => {
                                     if (chat.chat_type === 0) {
                                         return (
@@ -511,7 +1181,14 @@ export default function Messages() {
                                 Encrypted. Fingerprint:
                                 {pubKey}
                             </p>
-                            <h1 className="chat-name"># Watson</h1>
+                            <h1 className="chat-name">
+                                #{" "}
+                                {
+                                    chats.find(
+                                        (chat) => chat.chat_id === chatID
+                                    )?.other_user_name
+                                }
+                            </h1>
                         </div>
                         <div className="btns">
                             <div className="btn active">
@@ -549,38 +1226,27 @@ export default function Messages() {
                     </header>
                     <hr className="hr" />
                     <section className="chat">
-                        <div className="message foreign">
-                            <div className="message-cont">
-                                <p>
-                                    Lorem ipsum dolor sit amet consectetur,
-                                    adipisicing elit. Consequatur hic numquam
-                                    nihil odit? Ut doloremque quisquam nam dicta
-                                    unde? Repudiandae tenetur debitis adipisci
-                                    dolor nostrum accusamus impedit qui
-                                    molestiae. Optio!
-                                </p>
-                            </div>
-                            <p className="time">John Doe - 23:04</p>
-                        </div>
-                        <div className="message foreign">
-                            <div className="message-cont">
-                                <p>
-                                    Lorem ipsum dolor sit amet consectetur,
-                                    adipisicing elit. Consequatur hic numquam
-                                    nihil odit? Ut doloremque quisquam nam dicta
-                                    unde? Repudiandae tenetur debitis adipisci
-                                    dolor nostrum accusamus impedit qui
-                                    molestiae. Optio!
-                                </p>
-                            </div>
-                            <p className="time">John Doe - 23:04</p>
-                        </div>
-                        <div className="message local">
-                            <div className="message-cont">
-                                <p>Totally agree!</p>
-                            </div>
-                            <p className="time">You - 23:04</p>
-                        </div>
+                        {messages.map((msg) => {
+                            return (
+                                <div
+                                    className={`message ${
+                                        msg.sender_id === userId
+                                            ? "local"
+                                            : "foreign"
+                                    }`}
+                                >
+                                    <div className="message-cont">
+                                        <p>{msg.plaintext_content}</p>
+                                    </div>
+                                    <p className="time">
+                                        {msg.sender_id == userId
+                                            ? "You"
+                                            : msg.sender_name}{" "}
+                                        - {formatChatDate(msg.timestamp)}
+                                    </p>
+                                </div>
+                            );
+                        })}
                     </section>
                     <section className="input-cont">
                         <Button
@@ -589,7 +1255,11 @@ export default function Messages() {
                             narrow
                         />
                         <Input label="Message" id="message-input" textarea />
-                        <Button text="Send" id="send-btn" />
+                        <Button
+                            text="Send"
+                            id="send-btn"
+                            onClick={postMessage}
+                        />
                     </section>
                 </article>
                 <aside className="users">
@@ -621,6 +1291,7 @@ export default function Messages() {
                             You
                         </li>
                     </ul>
+                    <p>This sidebar is still under construction ;)</p>
                     <div className="profile-cont">
                         <Profile />
                     </div>
@@ -803,6 +1474,12 @@ export default function Messages() {
                         ></path>
                     </svg>
                 </div>
+            </div>
+            <div className="small-overlay">
+                <p>
+                    Please use a device with a bigger screen <br />
+                </p>
+                <span>(at least 850px wide)</span>
             </div>
         </div>
     );
