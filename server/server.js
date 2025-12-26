@@ -39,8 +39,17 @@ app.use(sessionParser);
 
 // CORS
 app.use((req, res, next) => {
-    const allowed = process.env.ALLOWED_ORIGINS || "http://localhost:3000";
-    res.set("Access-Control-Allow-Origin", allowed);
+    const allowedOrigins = (process.env.ALLOWED_ORIGINS || "http://localhost:3000,http://ernestsgm.com,http://www.ernestsgm.com,http://api.ernestsgm.com,http://www.api.ernestsgm.com").split(",");
+    const origin = req.headers.origin;
+    
+    // Check if the request origin is in the allowed list
+    if (origin && allowedOrigins.includes(origin)) {
+        res.set("Access-Control-Allow-Origin", origin);
+    } else if (allowedOrigins.length === 1) {
+        // If only one origin, set it directly (for development)
+        res.set("Access-Control-Allow-Origin", allowedOrigins[0]);
+    }
+    
     res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
     res.set(
         "Access-Control-Allow-Headers",
@@ -125,6 +134,13 @@ setInterval(() => {
 }, HEARTBEAT_INTERVAL);
 
 export default wss;
+
+app.get("/", (req, res) => {
+    res.json({
+        status: "ok",
+        timestamp: Date.now(),
+    });
+});
 
 server.listen(process.env.PORT || FALLBACK_PORT, () => {
     console.log(

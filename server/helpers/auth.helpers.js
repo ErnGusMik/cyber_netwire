@@ -2,7 +2,7 @@ import crypto, { pbkdf2 } from "crypto";
 import bcrypt from "bcrypt";
 
 import query, { pool } from "../db/db.connect.js";
-import * as argon from "argon2";
+import { Argon2, Argon2Mode } from "@sphereon/isomorphic-argon2";
 
 const checkIfUserExists = async (email) => {
     const res = await query('SELECT * FROM "user" WHERE email = $1', [email]);
@@ -41,15 +41,18 @@ const createKey = async (password) => {
     // return [key, salt];
 
     const salt = crypto.randomBytes(16);
-    const key = await argon.hash(password, {
-        salt: salt,
+    const saltString = salt.toString('base64');
+    
+    const result = await Argon2.hash(password, saltString, {
         hashLength: 32,
+        memory: 65536,
         parallelism: 1,
-        memoryCost: 65536,
-        type: argon.argon2id,
+        mode: Argon2Mode.Argon2id,
         iterations: 3,
-        raw: true,
     });
+    
+    // Convert hex result back to Buffer for compatibility
+    const key = Buffer.from(result.hex, 'hex');
 
     return [key, salt];
 };

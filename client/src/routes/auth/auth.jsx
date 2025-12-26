@@ -24,7 +24,7 @@ export default function Auth() {
         document.getElementById("google_btn").style.pointerEvents = "none";
 
         // Verify Google response
-        const req = await fetch("http://localhost:8080/auth/google", {
+        const req = await fetch("http://api.ernestsgm.com/auth/google", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -112,7 +112,7 @@ export default function Auth() {
     // Load CSRF Token
     React.useEffect(() => {
         const loadCSRF = async () => {
-            const req = await fetch("http://localhost:8080/auth/csrf-token", {
+            const req = await fetch("http://api.ernestsgm.com/auth/csrf-token", {
                 method: "GET",
                 credentials: "include",
             });
@@ -326,7 +326,7 @@ export default function Auth() {
 
         console.log("[INFO][LOGIN] Sending login/signup request to server...");
         // Send password to server & create user if needed
-        const req = await fetch("http://localhost:8080/auth/verify", {
+        const req = await fetch("http://api.ernestsgm.com/auth/verify", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -458,7 +458,7 @@ export default function Auth() {
                 "[INFO][SIGNUP] Securely storing Signal Protocol private keys..."
             );
             const keyReq = await fetch(
-                "http://localhost:8080/auth/upload-privkeys",
+                "http://api.ernestsgm.com/auth/upload-privkeys",
                 {
                     method: "POST",
                     headers: {
@@ -601,7 +601,7 @@ export default function Auth() {
         }
 
         const registrationReq = await fetch(
-            "http://localhost:8080/auth/register-device",
+            "http://api.ernestsgm.com/auth/register-device",
             {
                 method: "POST",
                 headers: {
