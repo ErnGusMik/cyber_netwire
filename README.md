@@ -2,7 +2,7 @@
 
 A work-in-progress online chat application.
 
-### This branch is for progress regarding the implementation of the Signal protocol!
+### To test the messaging functionality, one needs at least 2 Google accounts!
 
 Read the threat model and design decisions in the [THREAT_MODEL.md](THREAT_MODEL.md) file.
 
