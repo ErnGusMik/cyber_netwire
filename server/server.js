@@ -37,6 +37,7 @@ const sessionParser = session({
             process.env.NODE_ENV === "production"
                 ? ".ernestsgm.com"
                 : undefined,
+        partitioned: process.env.NODE_ENV === "production",
     },
     store: new (connectPgSimple(session))({ pool: pool }),
 });

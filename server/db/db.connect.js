@@ -5,7 +5,10 @@ export const pool = new pg.Pool({
     password: process.env.DBPASSW,
     host: process.env.DBHOST,
     port: process.env.DBPORT,
-    database: process.env.DBNAME
+    database: process.env.DBNAME,
+    ssl: {
+        rejectUnauthorized: false
+    }
 })
 
 pool.on('error', (err, client) => {
@@ -16,9 +19,7 @@ pool.on('error', (err, client) => {
 
 
 const query = async (text, params) => {
-    // const client = await pool.connect()
     const res =  await pool.query(text, params)
-    // client.release();
     return res;
 }
 

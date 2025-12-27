@@ -13,7 +13,7 @@ export default function Profile({ loaderData }) {
     };
 
     const handleStatusChange = async (val) => {
-        const req = await fetch("https://ernestsgm.com/api/status", {
+        const req = await fetch("https://api.ernestsgm.com/api/status", {
             method: "PUT",
             headers: {
                 "Content-Type": "application/json",
@@ -43,7 +43,7 @@ export default function Profile({ loaderData }) {
 
     React.useEffect(() => {
         const getStatus = async () => {
-            const req = await fetch("https://ernestsgm.com/api/status", {
+            const req = await fetch("https://api.ernestsgm.com/api/status", {
                 method: "GET",
                 headers: {
                     "Content-Type": "application/json",
