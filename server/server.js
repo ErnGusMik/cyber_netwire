@@ -29,7 +29,7 @@ const sessionParser = session({
     cookie: {
         secure: process.env.NODE_ENV === "production",
         httpOnly: true,
-        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+        sameSite: "none",
         maxAge: 7 * 24 * 60 * 60 * 1000,
     },
     store: new (connectPgSimple(session))({ pool: pool }),
@@ -39,15 +39,18 @@ app.use(sessionParser);
 
 // CORS
 app.use((req, res, next) => {
-    const allowedOrigins = (process.env.ALLOWED_ORIGINS || "http://localhost:3000,http://ernestsgm.com,http://www.ernestsgm.com,http://api.ernestsgm.com,http://www.api.ernestsgm.com").split(",");
+    // In production, this is not needed, because CORS is set by the Apache server
+    const allowedOrigins = [
+        "https://ernestsgm.com",
+        "http://ernestsgm.com",
+        "https://www.ernestsgm.com",
+        "http://localhost:3000"
+    ];
+
     const origin = req.headers.origin;
-    
-    // Check if the request origin is in the allowed list
+
     if (origin && allowedOrigins.includes(origin)) {
-        res.set("Access-Control-Allow-Origin", origin);
-    } else if (allowedOrigins.length === 1) {
-        // If only one origin, set it directly (for development)
-        res.set("Access-Control-Allow-Origin", allowedOrigins[0]);
+        res.setHeader("Access-Control-Allow-Origin", origin);
     }
     
     res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
@@ -56,6 +59,10 @@ app.use((req, res, next) => {
         "Content-Type, X-CSRF-Token, Accept, Authorization"
     );
     res.set("Access-Control-Allow-Credentials", "true");
+
+    if (req.method === "OPTIONS") {
+        return res.sendStatus(204);
+    }
     next();
 });
 
@@ -72,7 +79,7 @@ const wss = new WebSocketServer({ noServer: true });
 
 // Allowed origins for upgrades (comma-separated env var)
 const allowedOrigins = (
-    process.env.ALLOWED_ORIGINS || "http://localhost:3000"
+    process.env.ALLOWED_ORIGINS || "http://localhost:3000,https://ernestsgm.com,https://www.ernestsgm.com"
 ).split(",");
 
 server.on("upgrade", (req, socket, head) => {

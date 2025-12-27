@@ -24,7 +24,7 @@ export default function Auth() {
         document.getElementById("google_btn").style.pointerEvents = "none";
 
         // Verify Google response
-        const req = await fetch("http://api.ernestsgm.com/auth/google", {
+        const req = await fetch("https://api.ernestsgm.com/auth/google", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -112,7 +112,7 @@ export default function Auth() {
     // Load CSRF Token
     React.useEffect(() => {
         const loadCSRF = async () => {
-            const req = await fetch("http://api.ernestsgm.com/auth/csrf-token", {
+            const req = await fetch("https://api.ernestsgm.com/auth/csrf-token", {
                 method: "GET",
                 credentials: "include",
             });
@@ -192,6 +192,7 @@ export default function Auth() {
     }
 
     // Create key from password using Argon2id
+    // TODO: move to bcrypt. argon2 does not work in production on the server.
     const createKey = async (password, salt) => {
         const key = await Argon2.hash(password, Uint8Array.fromHex(salt), {
             mode: Argon2Mode.Argon2id,
@@ -326,7 +327,7 @@ export default function Auth() {
 
         console.log("[INFO][LOGIN] Sending login/signup request to server...");
         // Send password to server & create user if needed
-        const req = await fetch("http://api.ernestsgm.com/auth/verify", {
+        const req = await fetch("https://api.ernestsgm.com/auth/verify", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -458,7 +459,7 @@ export default function Auth() {
                 "[INFO][SIGNUP] Securely storing Signal Protocol private keys..."
             );
             const keyReq = await fetch(
-                "http://api.ernestsgm.com/auth/upload-privkeys",
+                "https://api.ernestsgm.com/auth/upload-privkeys",
                 {
                     method: "POST",
                     headers: {
@@ -601,7 +602,7 @@ export default function Auth() {
         }
 
         const registrationReq = await fetch(
-            "http://api.ernestsgm.com/auth/register-device",
+            "https://api.ernestsgm.com/auth/register-device",
             {
                 method: "POST",
                 headers: {

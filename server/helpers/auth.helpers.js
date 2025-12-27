@@ -11,6 +11,7 @@ const checkIfUserExists = async (email) => {
 };
 
 const createKey = async (password) => {
+    //TODO: move to bcrypt. argon2 causes issues -- the nodejs library cannot be installed in production
     // // Transform password to CryptoKey object
     // password = await crypto.subtle.importKey(
     //     "raw",
@@ -253,7 +254,8 @@ const validateCSRFToken = (req, res) => {
     const csrfToken = createCSRFToken(req, res);
     res.cookie("csrf-token", csrfToken, {
         secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
+        sameSite: "none",
+        domain: ".ernestsgm.com",
     });
     return csrfToken;
 };

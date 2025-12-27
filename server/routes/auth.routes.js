@@ -20,7 +20,8 @@ const generateCSRFToken = (req, res) => {
     const token = createCSRFToken(req, res);
     res.cookie("csrf-token", token, {
         secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
+        sameSite: "none",
+        domain: ".ernestsgm.com",
     });
     res.status(200).send({
         "x-csrf-token": token,
