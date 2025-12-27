@@ -86,37 +86,6 @@ const getUserDisplayName = async (user_id) => {
     return result.rows[0].display_name;
 };
 
-const sendKey = async (key, user_id, chat_id, key_version) => {
-    const pub_key = await query('SELECT pub_key FROM "user" WHERE id = $1', [
-        user_id,
-    ]);
-    if (pub_key.rowCount === 0) {
-        return false;
-    }
-    const pubKey = crypto.createPublicKey({
-        key: Buffer.from(pub_key.rows[0].pub_key, "hex"),
-        format: "der",
-        type: "spki",
-    });
-
-    const encryptedKey = crypto.publicEncrypt(pubKey, key);
-    const upload = await query(
-        "INSERT INTO keys (recipient_id, chat_id, key_version, key, pub_key) VALUES ($1, $2, $3, $4, $5) RETURNING key",
-        [
-            user_id,
-            chat_id,
-            key_version,
-            buf2hex(encryptedKey),
-            pub_key.rows[0].pub_key,
-        ]
-    );
-    if (upload.rowCount === 0) {
-        return false;
-    }
-
-    return upload;
-};
-
 const getUserFromDisplayName = async (displayName, user_no) => {
     const userResult = await query(
         `SELECT * FROM "user" WHERE display_name = $1 AND user_no = $2`,
@@ -214,7 +183,6 @@ const getAllChatMembers = async (chatId) => {
 export {
     checkIfUserExists,
     checkIfUsersAreFriends,
-    sendKey,
     getUserFromDisplayName,
     fetchPrekeyBundle,
     checkIfChatExists,

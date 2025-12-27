@@ -23,7 +23,9 @@ app.use(cookieParser());
 
 // Session setup - create a reusable session parser for HTTP and WebSocket upgrades
 const sessionParser = session({
-    secret: process.env.SESSION_SECRET || "dev-secret-please-set-in-env",
+    secret:
+        process.env.SESSION_SECRET ||
+        "this-is-my-dev-secret-which-should-probably-be-changed",
     resave: false,
     saveUninitialized: false,
     cookie: {
@@ -31,6 +33,11 @@ const sessionParser = session({
         httpOnly: true,
         sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
         maxAge: 7 * 24 * 60 * 60 * 1000,
+        domain:
+            process.env.NODE_ENV === "production"
+                ? ".ernestsgm.com"
+                : undefined,
+        partitioned: process.env.NODE_ENV === "production",
     },
     store: new (connectPgSimple(session))({ pool: pool }),
 });
@@ -39,23 +46,30 @@ app.use(sessionParser);
 
 // CORS
 app.use((req, res, next) => {
-    const allowedOrigins = (process.env.ALLOWED_ORIGINS || "http://localhost:3000,http://ernestsgm.com,http://www.ernestsgm.com,http://api.ernestsgm.com,http://www.api.ernestsgm.com").split(",");
+    // In production, this is not needed, because CORS is set by the Apache server
+    const allowedOrigins = [
+        "https://ernestsgm.com",
+        "http://ernestsgm.com",
+        "https://www.ernestsgm.com",
+        "http://localhost:3000",
+    ];
+
     const origin = req.headers.origin;
-    
-    // Check if the request origin is in the allowed list
+
     if (origin && allowedOrigins.includes(origin)) {
-        res.set("Access-Control-Allow-Origin", origin);
-    } else if (allowedOrigins.length === 1) {
-        // If only one origin, set it directly (for development)
-        res.set("Access-Control-Allow-Origin", allowedOrigins[0]);
+        res.setHeader("Access-Control-Allow-Origin", origin);
     }
-    
+
     res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
     res.set(
         "Access-Control-Allow-Headers",
         "Content-Type, X-CSRF-Token, Accept, Authorization"
     );
     res.set("Access-Control-Allow-Credentials", "true");
+
+    if (req.method === "OPTIONS") {
+        return res.sendStatus(204);
+    }
     next();
 });
 
@@ -72,7 +86,8 @@ const wss = new WebSocketServer({ noServer: true });
 
 // Allowed origins for upgrades (comma-separated env var)
 const allowedOrigins = (
-    process.env.ALLOWED_ORIGINS || "http://localhost:3000"
+    process.env.ALLOWED_ORIGINS ||
+    "http://localhost:3000,https://ernestsgm.com,https://www.ernestsgm.com"
 ).split(",");
 
 server.on("upgrade", (req, socket, head) => {
@@ -80,9 +95,9 @@ server.on("upgrade", (req, socket, head) => {
 
     // Only accept upgrades for the messages websocket path
     // If your client connects to a different path, it will never trigger this handler
-    if (!req.url || !req.url.startsWith('/ws/messages')) {
-        console.warn('WS upgrade rejected: unexpected path', { url: req.url });
-        socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+    if (!req.url || !req.url.startsWith("/ws/messages")) {
+        console.warn("WS upgrade rejected: unexpected path", { url: req.url });
+        socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
         socket.destroy();
         return;
     }

@@ -2,83 +2,12 @@ import crypto, { pbkdf2 } from "crypto";
 import bcrypt from "bcrypt";
 
 import query, { pool } from "../db/db.connect.js";
-import { Argon2, Argon2Mode } from "@sphereon/isomorphic-argon2";
 
 const checkIfUserExists = async (email) => {
     const res = await query('SELECT * FROM "user" WHERE email = $1', [email]);
     if (res.rows.length > 0) return res.rows[0];
     return false;
 };
-
-const createKey = async (password) => {
-    // // Transform password to CryptoKey object
-    // password = await crypto.subtle.importKey(
-    //     "raw",
-    //     Buffer.from(password),
-    //     "PBKDF2",
-    //     false,
-    //     ["deriveKey"]
-    // );
-
-    // const salt = crypto.randomBytes(16);
-    // // Use the password to create a key using the PBKDF2 algorithm
-    // // to be used by the AES-GCM algorithm
-    // const key = await crypto.subtle.deriveKey(
-    //     {
-    //         name: "PBKDF2",
-    //         salt: salt,
-    //         iterations: 100000,
-    //         hash: "SHA-256",
-    //     },
-    //     password,
-    //     {
-    //         name: "AES-GCM",
-    //         length: 256,
-    //     },
-    //     false,
-    //     ["encrypt", "decrypt"]
-    // );
-    // return [key, salt];
-
-    const salt = crypto.randomBytes(16);
-    const saltString = salt.toString('base64');
-    
-    const result = await Argon2.hash(password, saltString, {
-        hashLength: 32,
-        memory: 65536,
-        parallelism: 1,
-        mode: Argon2Mode.Argon2id,
-        iterations: 3,
-    });
-    
-    // Convert hex result back to Buffer for compatibility
-    const key = Buffer.from(result.hex, 'hex');
-
-    return [key, salt];
-};
-
-const generateRSA = async () => {
-    // Generate RSA key pair
-    const { publicKey, privateKey } = await crypto.subtle.generateKey(
-        {
-            name: "RSA-OAEP",
-            modulusLength: 4096,
-            publicExponent: new Uint8Array([1, 0, 1]),
-            hash: "SHA-256",
-        },
-        true,
-        ["encrypt", "decrypt"]
-    );
-
-    return { publicKey, privateKey };
-};
-
-function buf2hex(buffer) {
-    // buffer is an ArrayBuffer
-    return [...new Uint8Array(buffer)]
-        .map((x) => x.toString(16).padStart(2, "0"))
-        .join("");
-}
 
 function arrayBufferToBase64Node(ab) {
     return Buffer.from(ab).toString("base64");
@@ -104,40 +33,10 @@ const toBuffer = (pub) => {
     throw new TypeError("Unsupported publicKey format");
 };
 
-const createUser = async (user, password) => {
-    // Get key from password
-    const [rawKey, saltPsswEncryption] = await createKey(password);
+const createUser = async (user, password, salt) => {
+    // Hash password verifier
+    const hashedVerifierKey = await bcrypt.hash(password, 10);
 
-    const key = await crypto.subtle.importKey(
-        "raw",
-        toBuffer(rawKey),
-        { name: "AES-GCM" },
-        false,
-        ["encrypt", "decrypt"]
-    );
-
-    // Encrypt user data
-    const iv = crypto.randomBytes(16);
-
-    const name = await crypto.subtle.encrypt(
-        { name: "AES-GCM", iv },
-        key,
-        Buffer.from(String(user.name), "utf8")
-    );
-
-    // Hash password (not related to encryption)
-    const salt = await bcrypt.genSalt(10);
-    const pssw = await bcrypt.hash(password, salt);
-
-    // Generate RSA key pair
-    const rsa = await generateRSA();
-
-    const private_key = await crypto.subtle.encrypt(
-        { name: "AES-GCM", iv },
-        key,
-        await crypto.subtle.exportKey("pkcs8", rsa.privateKey)
-    );
-    const public_key = await crypto.subtle.exportKey("spki", rsa.publicKey);
     // Check for user number with according display name
     const res = await query(
         'SELECT user_no FROM "user" WHERE display_name = $1',
@@ -150,24 +49,18 @@ const createUser = async (user, password) => {
 
     const values = [
         user.googleID,
-        buf2hex(name),
+        user.name,
         user.email,
         user.displayName,
-        pssw,
-        buf2hex(public_key),
-        buf2hex(private_key),
         user_no,
-        iv.toString("hex"),
-        saltPsswEncryption.toString("hex"),
+        salt,
+        hashedVerifierKey,
     ];
 
-    // console.log(values);
-    // log raw key
-    console.log("Raw key:", buf2hex(rawKey));
 
     // Store user in database
     const dbRes = await query(
-        'INSERT INTO "user" (google_id, name, email, display_name, password, pub_key, priv_key, user_no, password_iv, salt) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
+        'INSERT INTO "user" (google_id, name, email, display_name, user_no, salt, libsignal_verifier) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
         values
     );
 
@@ -176,19 +69,17 @@ const createUser = async (user, password) => {
         return;
     }
 
-    return [
-        dbRes.rows[0].id,
-        buf2hex(private_key),
-        iv.toString("hex"),
-        saltPsswEncryption.toString("hex"),
-    ];
+    console.log("CREATED USER VERIFIER:", password);
+    return [dbRes.rows[0].id, salt];
 };
 
 const validatePassword = async (email, password) => {
-    const res = await query('SELECT libsignal_verifier FROM "user" WHERE email = $1', [
-        email,
-    ]);
+    const res = await query(
+        'SELECT libsignal_verifier FROM "user" WHERE email = $1',
+        [email]
+    );
     if (res.rows.length === 0) {
+        console.log("No user found for email:", email);
         return false;
     }
     const existingHash = res.rows[0].libsignal_verifier;
@@ -253,17 +144,17 @@ const validateCSRFToken = (req, res) => {
     const csrfToken = createCSRFToken(req, res);
     res.cookie("csrf-token", csrfToken, {
         secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+        domain: process.env.NODE_ENV === "production" ? ".ernestsgm.com" : undefined,
     });
     return csrfToken;
 };
 
 const uploadUserKeys = async (userId, keyBundle) => {
     const res = await query(
-        "INSERT INTO user_keys (user_id, device_id, registration_id, identity_key, created_at) VALUES ($1, $2, $3, $4, to_timestamp($5 / 1000.0)) RETURNING *",
+        "INSERT INTO user_keys (user_id, registration_id, identity_key, created_at) VALUES ($1, $2, $3, to_timestamp($4 / 1000.0)) RETURNING *",
         [
             userId,
-            keyBundle.deviceId || 1,
             keyBundle.registrationId,
             toBuffer(keyBundle.identityKey),
             keyBundle.timestamp || Date.now(),
@@ -287,7 +178,14 @@ const uploadOneTimePrekeys = async (userId, preKeys, deviceId) => {
 
         for (const pk of preKeys) {
             const bufPub = toBuffer(pk.publicKey);
-            await client.query(insertText, [userId, pk.keyId, bufPub, toBuffer(pk.privKey), toBuffer(pk.iv), deviceId]);
+            await client.query(insertText, [
+                userId,
+                pk.keyId,
+                bufPub,
+                toBuffer(pk.privKey),
+                toBuffer(pk.iv),
+                deviceId,
+            ]);
             inserted++;
         }
 
@@ -302,7 +200,7 @@ const uploadOneTimePrekeys = async (userId, preKeys, deviceId) => {
     }
 };
 
-const uploadPrivateKeys = async (userId, identityKey, idkIV,) => {
+const uploadPrivateKeys = async (userId, identityKey, idkIV) => {
     const res = await query(
         "INSERT INTO priv_keys (user_id, identity_key, idk_iv) VALUES ($1, $2, $3) RETURNING *",
         [userId, toBuffer(identityKey), toBuffer(idkIV)]
@@ -311,53 +209,53 @@ const uploadPrivateKeys = async (userId, identityKey, idkIV,) => {
     return res.rows[0];
 };
 
-const addLibsignalVerifier = async (userId, verifierKey) => {
-    // hash verifierKey before storing (bcrypt)
-    const hashedVerifierKey = await bcrypt.hash(verifierKey, 10);
-    console.log("Hashed verifier key:", hashedVerifierKey);
-
-    const res = await query(
-        'UPDATE "user" SET libsignal_verifier = $1 WHERE id = $2 RETURNING *',
-        [hashedVerifierKey, userId]
-    );
-    return res.rows[0];
-};
-
 const loadPrivateKeys = async (userId) => {
-    const res = await query(
-        "SELECT * FROM priv_keys WHERE user_id = $1",
-        [userId]
-    );
+    const res = await query("SELECT * FROM priv_keys WHERE user_id = $1", [
+        userId,
+    ]);
     if (res.rows.length === 0) {
         return null;
     }
     const keys = {
         identity_key: arrayBufferToBase64Node(res.rows[0].identity_key),
         idk_iv: arrayBufferToBase64Node(res.rows[0].idk_iv),
-    }
+    };
     return keys;
-}
+};
 
 const fetchAllOPKs = async (userId) => {
     const res = await query(
         "SELECT key_id, public_key, priv_key, key_iv FROM opk_keys WHERE user_id = $1 AND is_used = false",
         [userId]
     );
-    return res.rows.map(row => ({
+    return res.rows.map((row) => ({
         keyId: row.key_id,
         publicKey: arrayBufferToBase64Node(row.public_key),
         privKey: arrayBufferToBase64Node(row.priv_key),
         iv: arrayBufferToBase64Node(row.key_iv),
     }));
-}
+};
 
-const registerDevice = async (userId, spkId, spkPubKey, spkSignature, identityKey) => {
+const registerDevice = async (
+    userId,
+    spkId,
+    spkPubKey,
+    spkSignature,
+    identityKey
+) => {
     const res = await query(
         "INSERT INTO device_keys (user_id, spk_id, spk_public_key, spk_signature, identity_key, last_seen) VALUES ($1, $2, $3, $4, $5, to_timestamp($6 / 1000.0)) RETURNING device_id",
-        [userId, spkId, toBuffer(spkPubKey), toBuffer(spkSignature), toBuffer(identityKey), Date.now()]
+        [
+            userId,
+            spkId,
+            toBuffer(spkPubKey),
+            toBuffer(spkSignature),
+            toBuffer(identityKey),
+            Date.now(),
+        ]
     );
     return res.rows[0].device_id;
-}
+};
 
 const fetchRegistrationBundle = async (userId) => {
     const bundleRes = await query(
@@ -374,7 +272,7 @@ const fetchRegistrationBundle = async (userId) => {
     };
 
     return bundle;
-}
+};
 
 export {
     checkIfUserExists,
@@ -385,7 +283,6 @@ export {
     uploadUserKeys,
     uploadOneTimePrekeys,
     uploadPrivateKeys,
-    addLibsignalVerifier,
     loadPrivateKeys,
     fetchAllOPKs,
     registerDevice,
