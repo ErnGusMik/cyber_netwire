@@ -20,8 +20,8 @@ const generateCSRFToken = (req, res) => {
     const token = createCSRFToken(req, res);
     res.cookie("csrf-token", token, {
         secure: process.env.NODE_ENV === "production",
-        sameSite: "none",
-        domain: ".ernestsgm.com",
+        sameSite: "lax",
+        // domain: ".ernestsgm.com",
     });
     res.status(200).send({
         "x-csrf-token": token,
@@ -111,14 +111,15 @@ const verifyPassword = async (req, res) => {
     }
 
     const user = await checkIfUserExists(req.session.email);
-    let id, priv_key, pssw_iv, salt;
+    let id, pssw_iv, salt;
     let signalKeys = {};
     if (!user) {
         // Check required fields for signal protocol
         if (
             !req.body.keyBundle ||
             !req.body.keyBundle.registrationId ||
-            !req.body.keyBundle.identityKey
+            !req.body.keyBundle.identityKey ||
+            !req.body.salt
         ) {
             res.status(400).send({
                 error: "Missing key bundle for new user",
@@ -127,7 +128,7 @@ const verifyPassword = async (req, res) => {
             return;
         }
 
-        const created = await createUser(req.session, req.body.password);
+        const created = await createUser(req.session, req.body.password, req.body.salt);
         if (!created[0]) {
             res.status(500).send({
                 error: "Failed to create user",
@@ -136,9 +137,8 @@ const verifyPassword = async (req, res) => {
             return;
         }
         id = created[0];
-        priv_key = created[1];
-        pssw_iv = created[2];
-        salt = created[3];
+        pssw_iv = created[1];
+        salt = created[2];
 
         // Upload key bundle (signal protocol)
         const uploadRes = await uploadUserKeys(id, req.body.keyBundle);
@@ -190,9 +190,8 @@ const verifyPassword = async (req, res) => {
         csrfToken: csrfToken,
         userID: id,
         userCreated: !user,
-        privKey: user ? user.priv_key : priv_key,
         psswIV: user ? user.password_iv : pssw_iv,
-        salt: user ? user.salt : salt,
+        // salt: user ? user.salt : salt,
         identityKey: signalKeys.identity_key || null,
         idkIV: signalKeys.idk_iv || null,
         prekeyBundle: prekeyBundle,
@@ -374,15 +373,15 @@ const uploadPrivKeys = async (req, res) => {
         return;
     }
 
-    const addedVerifier = await addLibsignalVerifier(user.id, req.body.verifierKey);
+    // const addedVerifier = await addLibsignalVerifier(user.id, req.body.verifierKey);
     
-    if (!addedVerifier) {
-        res.status(500).send({
-            error: "Failed to add verifier key. Try again.",
-            csrfToken: csrfToken,
-        });
-        return;
-    }
+    // if (!addedVerifier) {
+    //     res.status(500).send({
+    //         error: "Failed to add verifier key. Try again.",
+    //         csrfToken: csrfToken,
+    //     });
+    //     return;
+    // }
 
     res.status(200).send({
         success: true,

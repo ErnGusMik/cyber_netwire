@@ -29,10 +29,12 @@ const sessionParser = session({
     cookie: {
         secure: process.env.NODE_ENV === "production",
         httpOnly: true,
-        sameSite: "none",
+        sameSite: "lax",
         maxAge: 7 * 24 * 60 * 60 * 1000,
+        // domain: '.ernestsgm.com',
     },
     store: new (connectPgSimple(session))({ pool: pool }),
+    
 });
 
 app.use(sessionParser);

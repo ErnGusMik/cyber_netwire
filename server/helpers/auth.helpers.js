@@ -105,40 +105,40 @@ const toBuffer = (pub) => {
     throw new TypeError("Unsupported publicKey format");
 };
 
-const createUser = async (user, password) => {
-    // Get key from password
-    const [rawKey, saltPsswEncryption] = await createKey(password);
+const createUser = async (user, password, salt) => {
+    // // Get key from password
+    // const [rawKey, saltPsswEncryption] = await createKey(password);
 
-    const key = await crypto.subtle.importKey(
-        "raw",
-        toBuffer(rawKey),
-        { name: "AES-GCM" },
-        false,
-        ["encrypt", "decrypt"]
-    );
+    // const key = await crypto.subtle.importKey(
+    //     "raw",
+    //     toBuffer(rawKey),
+    //     { name: "AES-GCM" },
+    //     false,
+    //     ["encrypt", "decrypt"]
+    // );
 
     // Encrypt user data
     const iv = crypto.randomBytes(16);
 
-    const name = await crypto.subtle.encrypt(
-        { name: "AES-GCM", iv },
-        key,
-        Buffer.from(String(user.name), "utf8")
-    );
+    // const name = await crypto.subtle.encrypt(
+    //     { name: "AES-GCM", iv },
+    //     key,
+    //     Buffer.from(String(user.name), "utf8")
+    // );
 
     // Hash password (not related to encryption)
-    const salt = await bcrypt.genSalt(10);
-    const pssw = await bcrypt.hash(password, salt);
+    // const salt = await bcrypt.genSalt(10);
+    // const pssw = await bcrypt.hash(password, salt);
 
     // Generate RSA key pair
-    const rsa = await generateRSA();
+    // const rsa = await generateRSA();
 
-    const private_key = await crypto.subtle.encrypt(
-        { name: "AES-GCM", iv },
-        key,
-        await crypto.subtle.exportKey("pkcs8", rsa.privateKey)
-    );
-    const public_key = await crypto.subtle.exportKey("spki", rsa.publicKey);
+    // const private_key = await crypto.subtle.encrypt(
+    //     { name: "AES-GCM", iv },
+    //     key,
+    //     await crypto.subtle.exportKey("pkcs8", rsa.privateKey)
+    // );
+    // const public_key = await crypto.subtle.exportKey("spki", rsa.publicKey);
     // Check for user number with according display name
     const res = await query(
         'SELECT user_no FROM "user" WHERE display_name = $1',
@@ -151,24 +151,25 @@ const createUser = async (user, password) => {
 
     const values = [
         user.googleID,
-        buf2hex(name),
+        user.name,
         user.email,
         user.displayName,
         pssw,
-        buf2hex(public_key),
-        buf2hex(private_key),
+        // buf2hex(public_key),
+        // buf2hex(private_key),
         user_no,
         iv.toString("hex"),
-        saltPsswEncryption.toString("hex"),
+        salt,
+        password, // temporarily store raw password for libsignal verifier creation
     ];
 
     // console.log(values);
     // log raw key
-    console.log("Raw key:", buf2hex(rawKey));
+    // console.log("Raw key:", buf2hex(rawKey));
 
     // Store user in database
     const dbRes = await query(
-        'INSERT INTO "user" (google_id, name, email, display_name, password, pub_key, priv_key, user_no, password_iv, salt) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
+        'INSERT INTO "user" (google_id, name, email, display_name, password, user_no, password_iv, salt, libsignal_verifier) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *',
         values
     );
 
@@ -179,9 +180,8 @@ const createUser = async (user, password) => {
 
     return [
         dbRes.rows[0].id,
-        buf2hex(private_key),
         iv.toString("hex"),
-        saltPsswEncryption.toString("hex"),
+        salt,
     ];
 };
 
@@ -254,8 +254,8 @@ const validateCSRFToken = (req, res) => {
     const csrfToken = createCSRFToken(req, res);
     res.cookie("csrf-token", csrfToken, {
         secure: process.env.NODE_ENV === "production",
-        sameSite: "none",
-        domain: ".ernestsgm.com",
+        sameSite: "lax",
+        // domain: ".ernestsgm.com",
     });
     return csrfToken;
 };
