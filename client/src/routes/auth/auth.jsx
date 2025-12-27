@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import "./auth.css";
 
-// import * as libsignal from "@signalapp/libsignal-client";
 import * as libsignal from "@privacyresearch/libsignal-protocol-typescript";
 
 import Button from "../../components/button/button";
@@ -24,7 +23,7 @@ export default function Auth() {
         document.getElementById("google_btn").style.pointerEvents = "none";
 
         // Verify Google response
-        const req = await fetch("http://localhost:8080/auth/google", {
+        const req = await fetch("https://ernestsgm.com/auth/google", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -60,7 +59,6 @@ export default function Auth() {
         setName(res1.name);
         setVerifierData({
             salt: res1.salt,
-            password_iv: res1.passwordIV,
         });
 
         // Show password input
@@ -112,13 +110,10 @@ export default function Auth() {
     // Load CSRF Token
     React.useEffect(() => {
         const loadCSRF = async () => {
-            const req = await fetch(
-                "http://localhost:8080/auth/csrf-token",
-                {
-                    method: "GET",
-                    credentials: "include",
-                }
-            );
+            const req = await fetch("https://ernestsgm.com/auth/csrf-token", {
+                method: "GET",
+                credentials: "include",
+            });
             console.log("CSRF Token loaded: " + req.statusText);
             const res = await req.json();
 
@@ -192,15 +187,18 @@ export default function Auth() {
     }
 
     // Create key from password using Argon2id
-    // TODO: move to bcrypt. argon2 does not work in production on the server.
     const createKey = async (password, salt) => {
-        const key = await Argon2.hash(password, new Uint8Array(base64ToArrayBuffer(salt)), {
-            mode: Argon2Mode.Argon2id,
-            hashLength: 32,
-            memory: 65536,
-            parallelism: 1,
-            iterations: 3,
-        });
+        const key = await Argon2.hash(
+            password,
+            new Uint8Array(base64ToArrayBuffer(salt)),
+            {
+                mode: Argon2Mode.Argon2id,
+                hashLength: 32,
+                memory: 65536,
+                parallelism: 1,
+                iterations: 3,
+            }
+        );
         const cryptoKey = await window.crypto.subtle.importKey(
             "raw",
             hexToUint8Array(key.hex),
@@ -308,54 +306,53 @@ export default function Auth() {
         // ! SIGNAL PROTOCOL IMPLEMENTATION CONTINUES HERE
         // Signup & login flow
         console.log("[INFO][BOTH] Preparing password verifier key...");
-        // TODO: remove this line. new edits start here.
-        let salt, passwIv;
+
+        // Generate a salt, if user is signing up
+        let salt;
         if (signup) {
             salt = crypto.getRandomValues(new Uint8Array(16));
-            passwIv = crypto.getRandomValues(new Uint8Array(16));
             setVerifierData({
                 salt: salt,
-                password_iv: passwIv,
-            })
-            console.log("SALT NEW", salt);
+            });
         }
-        // TODO: remove this line. new edits end here.
 
-        // if (!signup) {
-            const [_, hkdfKey1] = await createKey(password, signup ? arrayBufferToBase64(salt) : verifierData.salt);
-            signalVerifier = await window.crypto.subtle.deriveKey(
-                {
-                    name: "HKDF",
-                    hash: "SHA-256",
-                    salt: signup ? salt : base64ToArrayBuffer(verifierData.salt),
-                    info: str2ab("E2E_PASSW_VERIFIER"),
-                },
-                hkdfKey1,
-                { name: "HMAC", hash: "SHA-256", length: 256 },
-                true,
-                ["sign", "verify"]
-            );
-        // }
+        const [_, hkdfKey] = await createKey(
+            password,
+            signup ? arrayBufferToBase64(salt) : verifierData.salt
+        );
+        signalVerifier = await window.crypto.subtle.deriveKey(
+            {
+                name: "HKDF",
+                hash: "SHA-256",
+                salt: signup ? salt : base64ToArrayBuffer(verifierData.salt),
+                info: str2ab("E2E_PASSW_VERIFIER"),
+            },
+            hkdfKey,
+            { name: "HMAC", hash: "SHA-256", length: 256 },
+            true,
+            ["sign", "verify"]
+        );
+
         // ! SIGNAL PROTOCOL IMPLEMENTATION STOPS HERE
 
         console.log("[INFO][LOGIN] Sending login/signup request to server...");
         // Send password to server & create user if needed
-        const req = await fetch("http://localhost:8080/auth/verify", {
+        const req = await fetch("https://ernestsgm.com/auth/verify", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
                 "X-CSRF-Token": prevCsrfToken,
             },
             body: JSON.stringify({
-                password: 
-                // signup
-                //     ? password :
+                password:
+                    // signup
+                    //     ? password :
                     arrayBufferToBase64(
-                          await window.crypto.subtle.exportKey(
-                              "raw",
-                              signalVerifier
-                          )
-                      ), // send derived verifier if logging in
+                        await window.crypto.subtle.exportKey(
+                            "raw",
+                            signalVerifier
+                        )
+                    ), // send derived verifier if logging in
                 keyBundle: signup ? registrationBundle : null, // send registration bundle if signing up
                 salt: signup ? arrayBufferToBase64(salt) : null,
             }),
@@ -384,42 +381,6 @@ export default function Auth() {
         );
 
         console.log("[INFO][BOTH] Decrypting legacy private key...");
-        // let rsaKey;
-        const [key, hkdfKey] = await createKey(password, signup ? arrayBufferToBase64(salt) : verifierData.salt);
-
-        // try {
-        //     const rsaKeyRaw = await window.crypto.subtle.decrypt(
-        //         {
-        //             name: "AES-GCM",
-        //             iv: new Uint8Array(
-        //                 res.psswIV.match(/../g).map((h) => parseInt(h, 16))
-        //             ),
-        //         },
-        //         key,
-        //         hexToUint8Array(res.privKey)
-        //     );
-        //     rsaKey = await window.crypto.subtle.importKey(
-        //         "pkcs8",
-        //         rsaKeyRaw,
-        //         {
-        //             name: "RSA-OAEP",
-        //             hash: "SHA-256",
-        //         },
-        //         true, //! change
-        //         ["decrypt"]
-        //     );
-        //     console.log("[INFO][BOTH] Legacy private key ready.");
-        // } catch (e) {
-        //     console.error(
-        //         "[ERROR][BOTH] Failed to decrypt legacy private key:",
-        //         e
-        //     );
-        //     document.getElementById("login-error").innerText =
-        //         "Failed to decrypt private key! Plesae try again or use a different browser";
-        //     console.error(e);
-        //     clearInterval(interval);
-        //     document.getElementById("login-overlay").style.display = "none";
-        // }
 
         // ! SIGNAL IMPLEMENTATION CONTINUES HERE
         // Signup & login flow
@@ -427,24 +388,12 @@ export default function Auth() {
         console.log(
             "[INFO][BOTH] Prepping password-derived verifier and encryption keys..."
         );
-        const verifierKey = await window.crypto.subtle.deriveKey(
-            {
-                name: "HKDF",
-                hash: "SHA-256",
-                salt: signup ? salt : base64ToArrayBuffer(verifierData.salt),
-                info: str2ab("E2E_PASSW_VERIFIER"),
-            },
-            hkdfKey,
-            { name: "HMAC", hash: "SHA-256", length: 256 },
-            true,
-            ["sign", "verify"]
-        );
 
         const encKey = await window.crypto.subtle.deriveKey(
             {
                 name: "HKDF",
                 hash: "SHA-256",
-                salt: hexToUint8Array(res.salt),
+                salt: signup ? salt : base64ToArrayBuffer(verifierData.salt),
                 info: str2ab("E2E_PASSW_ENC"),
             },
             hkdfKey,
@@ -468,7 +417,7 @@ export default function Auth() {
                 "[INFO][SIGNUP] Securely storing Signal Protocol private keys..."
             );
             const keyReq = await fetch(
-                "http://localhost:8080/auth/upload-privkeys",
+                "https://ernestsgm.com/auth/upload-privkeys",
                 {
                     method: "POST",
                     headers: {
@@ -478,9 +427,6 @@ export default function Auth() {
                     body: JSON.stringify({
                         identityKey: arrayBufferToBase64(encryptedIdentityKey),
                         idkIV: arrayBufferToBase64(idkIV.buffer),
-                        verifierKey: await window.crypto.subtle
-                            .exportKey("raw", verifierKey)
-                            .then((buf) => arrayBufferToBase64(buf)),
                     }),
                     credentials: "include",
                 }
@@ -515,17 +461,8 @@ export default function Auth() {
                 encKey,
                 ensureArrayBuffer(res.identityKey)
             );
-            // const decryptedSignedPreKey = await crypto.subtle.decrypt(
-            //     {
-            //         name: "AES-GCM",
-            //         iv: ensureArrayBuffer(res.spkIV),
-            //     },
-            //     encKey,
-            //     ensureArrayBuffer(res.signedPreKey)
-            // );
 
             privateKeys.identityKey.privKey = decryptedIdentityKey;
-            // spk_key = decryptedSignedPreKey;
         }
 
         // Login & Signup flow
@@ -563,7 +500,7 @@ export default function Auth() {
         }
 
         // Generating signed prekey
-        const signedPrekeyId = Math.floor(Math.random() * 1e9); // stable unique id for this prekey
+        const signedPrekeyId = Math.floor(Math.random() * 1e9);
 
         console.log(privateKeys.identityKey);
         const signedPreKey = await libsignal.KeyHelper.generateSignedPreKey(
@@ -578,7 +515,6 @@ export default function Auth() {
         // Use the async verifier and treat "no throw" as valid
         let verified = false;
         try {
-            // This will throw on an invalid signature (per the library implementation)
             await lib.Curve.async.verifySignature(
                 privateKeys.identityKey.pubKey,
                 signedPreKey.keyPair.pubKey,
@@ -609,7 +545,7 @@ export default function Auth() {
         }
 
         const registrationReq = await fetch(
-            "http://localhost:8080/auth/register-device",
+            "https://ernestsgm.com/auth/register-device",
             {
                 method: "POST",
                 headers: {
@@ -687,88 +623,11 @@ export default function Auth() {
             });
         }
         // ! SIGNAL IMPLEMENTATION STOPS HERE
-        // localStorage.setItem("isAuthenticated", true);
-        // window.location.href = `/${
-        //     searchParams.get("redirect") ? searchParams.get("redirect") : "home"
-        // }`;
 
-        // Setup service worker with decrypted RSA key
-        // const serviceWorkerSetup = () => {
-        //     // Set service worker (legacy RSA key for now)
-        //     navigator.serviceWorker.getRegistration("/").then((reg) => {
-        //         reg.active.postMessage({
-        //             test: "test",
-        //         });
-        //     });
-
-        //     try {
-        //         if ("serviceWorker" in navigator) {
-        //             if (!rsaKey) {
-        //                 console.error(
-        //                     "[ERROR][LOGIN] Cannot proceed. Legacy private key is undefined."
-        //                 );
-        //                 document.getElementById("login-error").innerText =
-        //                     "Failed to decrypt private key! Please try again or use a different browser";
-        //                 clearInterval(interval);
-        //                 document.getElementById("login-overlay").style.display =
-        //                     "none";
-
-        //                 setCSRFToken(res.csrfToken);
-        //                 return;
-        //             }
-
-        //             // Listen for response
-        //             const messageHandler = (event) => {
-        //                 if (event.data.type === "success") {
-        //                     console.log(
-        //                         "[INFO][LOGIN] Key setup successful in Service Worker."
-        //                     );
-        //                     navigator.serviceWorker.controller.removeEventListener(
-        //                         "message",
-        //                         messageHandler
-        //                     );
-        //                     clearInterval(interval);
-        //                     console.log(
-        //                         "[INFO][LOGIN] Process complete. Redirecting..."
-        //                     );
-        //                 } else {
-        //                     console.log(
-        //                         "[ERROR][LOGIN] Key setup failed in Service Worker"
-        //                     );
-        //                 }
-        //             };
-
-        //             navigator.serviceWorker.addEventListener(
-        //                 "message",
-        //                 messageHandler
-        //             );
-
-        //             navigator.serviceWorker
-        //                 .register("/sw.js")
-        //                 .then(async (reg) => {
-        //                     reg.active.postMessage({
-        //                         type: "setKey",
-        //                         key: rsaKey,
-        //                     });
-        //                 });
-        //             console.log(
-        //                 "[INFO][LOGIN] Service Worker registered. Awaiting key setup..."
-        //             );
-        //             return;
-        //         } else {
-        //             throw new Error("Service Worker not supported");
-        //         }
-        //     } catch (e) {
-        //         console.error(e);
-        //         document.getElementById("login-error").innerText =
-        //             "Failed to securely set private key! Please try again or use a different browser";
-        //         clearInterval(interval);
-        //         document.getElementById("login-overlay").style.display = "none";
-
-        //         setCSRFToken(res.csrfToken);
-        //     }
-        // };
-        // serviceWorkerSetup();
+        localStorage.setItem("isAuthenticated", true);
+        window.location.href = `/${
+            searchParams.get("redirect") ? searchParams.get("redirect") : "home"
+        }`;
     };
 
     return (

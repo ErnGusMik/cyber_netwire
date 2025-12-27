@@ -29,8 +29,6 @@ function useAuth() {
 }
 
 export default function Messages() {
-    // !! Next job: personalize ui (change from static data)
-    // TODO: update ui from received data
     // While loading use loading screen
     // While loading, fetch data from server
 
@@ -42,20 +40,12 @@ export default function Messages() {
     const [settings, setSettings] = React.useState(false);
     const [more, setMore] = React.useState(false);
     const [newChatError, setNewChatError] = React.useState("");
-    const [chatKey, setChatKey] = React.useState();
     const [userId, setUserId] = React.useState(0);
     const { chatID } = useParams();
 
     const [messages, setMessages] = React.useState(
         msgStore.getMessagesByChatId(chatID) || []
     );
-
-    // Crypto helper function
-    function hexToUint8Array(hexString) {
-        return new Uint8Array(
-            hexString.match(/../g).map((h) => parseInt(h, 16))
-        ).buffer;
-    }
 
     // Browser: base64 -> ArrayBuffer
     function isBase64String(str) {
@@ -187,7 +177,7 @@ export default function Messages() {
             const feed_passw =
                 document.getElementById("feed-passw-input").value;
 
-            const req = await fetch("http://localhost:8080/api/chat/new", {
+            const req = await fetch("https://ernestsgm.com/api/chat/new", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -226,7 +216,7 @@ export default function Messages() {
         const username = document.getElementById("username-input").value;
         const user_no = document.getElementById("user-no-input").value;
 
-        const req = await fetch("http://localhost:8080/api/chat/new", {
+        const req = await fetch("https://ernestsgm.com/api/chat/new", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -335,7 +325,7 @@ export default function Messages() {
 
         // Post initial message
         const postReq = await fetch(
-            `http://localhost:8080/api/chat/${res.chat_id}/post`,
+            `https://ernestsgm.com/api/chat/${res.chat_id}/post`,
             {
                 method: "POST",
                 headers: {
@@ -408,7 +398,7 @@ export default function Messages() {
     const loadData = async () => {
         // Fetch chats
         const chats = async () => {
-            const req = await fetch("http://localhost:8080/api/chat/all", {
+            const req = await fetch("https://ernestsgm.com/api/chat/all", {
                 method: "GET",
                 headers: {
                     "Content-Type": "application/json",
@@ -438,7 +428,7 @@ export default function Messages() {
 
         // Fetch friends
         const friends = async () => {
-            const req = await fetch("http://localhost:8080/api/friends/all", {
+            const req = await fetch("https://ernestsgm.com/api/friends/all", {
                 method: "GET",
                 headers: {
                     "Content-Type": "application/json",
@@ -459,7 +449,7 @@ export default function Messages() {
 
         // Fetch public key SHA1 hash (decorative purposes :D)
         const pubKey = async () => {
-            const req = await fetch("http://localhost:8080/api/public-key", {
+            const req = await fetch("https://ernestsgm.com/api/public-key", {
                 method: "GET",
                 headers: {
                     "Content-Type": "application/json",
@@ -481,7 +471,7 @@ export default function Messages() {
             console.log(chatID);
             if (chatID) {
                 const deviceReq = await fetch(
-                    `http://localhost:8080/api/chat/${chatID}/devices`,
+                    `https://ernestsgm.com/api/chat/${chatID}/devices`,
                     {
                         method: "GET",
                         headers: {
@@ -514,7 +504,7 @@ export default function Messages() {
                 }
 
                 const req = await fetch(
-                    `http://localhost:8080/api/chat/${chatID}/messages/15`,
+                    `https://ernestsgm.com/api/chat/${chatID}/messages/15`,
                     {
                         method: "GET",
                         headers: {
@@ -606,7 +596,8 @@ export default function Messages() {
                                         decoded,
                                         "DELIVERED",
                                         new Date(row.timestamp).getTime() ||
-                                            Date.now()
+                                            Date.now(),
+                                        row.display_name || "Other user"
                                     );
                                     stored = true;
                                     break;
@@ -642,7 +633,6 @@ export default function Messages() {
         await friends();
         await pubKey();
         await chat();
-        // await chatKey();
         openSocket(receiveMessage);
     };
 
@@ -705,6 +695,7 @@ export default function Messages() {
         if (!chatID) {
             return;
         }
+
         const message = document.getElementById("message-input").value;
         document.getElementById("message-input").value = "";
         if (message.trim() === "") {
@@ -740,7 +731,7 @@ export default function Messages() {
                     );
 
                     const sessionReq = await fetch(
-                        `http://localhost:8080/api/session/${currentUser}/${users[currentUser][j]}`,
+                        `https://ernestsgm.com/api/session/${currentUser}/${users[currentUser][j]}`,
                         {
                             method: "GET",
                             headers: {
@@ -826,7 +817,7 @@ export default function Messages() {
         }
 
         const req = await fetch(
-            `http://localhost:8080/api/chat/${chatID}/post`,
+            `https://ernestsgm.com/api/chat/${chatID}/post`,
             {
                 method: "POST",
                 headers: {
@@ -888,7 +879,7 @@ export default function Messages() {
                     "binary"
                 );
                 const chatReq = await fetch(
-                    "http://localhost:8080/api/chat/all",
+                    "https://ernestsgm.com/api/chat/all",
                     {
                         method: "GET",
                         headers: {

@@ -1,5 +1,5 @@
 const openSocket = (receiveMessage) => {
-    const socket = new WebSocket(`ws://localhost:8080/ws/messages`, "json");
+    const socket = new WebSocket(`wss://api.ernestsgm.com/ws/messages`, "json");
     
     socket.onopen = () => {
         console.log("WebSocket connection established");

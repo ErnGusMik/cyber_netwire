@@ -1,10 +1,12 @@
 import query from "../db/db.connect.js";
 import crypto from "crypto";
 import bcrypt from "bcrypt";
-import { validateCSRFToken } from "../helpers/auth.helpers.js";
+import {
+    fetchRegistrationBundle,
+    validateCSRFToken,
+} from "../helpers/auth.helpers.js";
 import {
     getUserFromDisplayName,
-    sendKey,
     checkIfUserExists,
     fetchPrekeyBundle,
     checkIfChatExists,
@@ -201,8 +203,6 @@ const newChat = async (req, res, next) => {
             [chat.rows[0].id, user.rows[0].id, new Date().toUTCString()]
         );
 
-        await sendKey(key, user.rows[0].id, chat.rows[0].id, 1);
-
         // ! SIGNAL PROTOCOL IMPLEMENTATION STARTS HERE
         // Initial key exchange (X3DH)
         // Fetch Prekey bundle
@@ -217,7 +217,6 @@ const newChat = async (req, res, next) => {
         }
         console.log("Prekey Bundle fetched for user ID:", user.rows[0].id);
         console.log(prekeyBundles);
-        // TODO: debugging this and then chatting (cannot read properties of undefined, reading bundles.push)
         bundles.push({
             user_id: user.rows[0].id,
             bundles: prekeyBundles,
@@ -226,23 +225,6 @@ const newChat = async (req, res, next) => {
     }
 
     if (notFound) return;
-
-    // Send key to creator
-    await sendKey(key, req.session.userID, chat.rows[0].id, 1);
-
-    // ! SIGNAL PROTOCOL IMPLEMENTATION STARTS HERE
-    // DMs initial key exchange
-    // Fetch Prekey bundle
-    // const prekeyBundle = await fetchPrekeyBundle(req.session.userID, req.body.device_id);
-    // if (prekeyBundle === null) {
-    //     res.status(500).send({
-    //         error: "Failed to fetch Prekey Bundle for Signal Protocol",
-    //     });
-    //     return;
-    // }
-    // console.log("Prekey Bundle fetched for user ID:", req.session.userID);
-    // console.log(prekeyBundle);
-    // ! SIGNAL PROTOCOL IMPLEMENTATION ENDS HERE
 
     res.status(201).send({
         chat_id: chat.rows[0].id,
@@ -357,22 +339,18 @@ const getUserPublicKeyHash = async (req, res, next) => {
         return;
     }
 
-    const result = await query('SELECT pub_key FROM "user" WHERE id = $1', [
-        req.session.userID,
-    ]);
+    const result = fetchRegistrationBundle(req.session.userID);
 
-    if (result.rowCount === 0) {
+    // Check if query was successful
+    if (!result) {
         res.status(500).send({
-            error: "Failed to get public key",
+            error: "Failed to get public key hash",
         });
         return;
     }
 
     res.status(200).send({
-        public_key: crypto
-            .createHash("sha1")
-            .update(result.rows[0].pub_key)
-            .digest("hex"),
+        public_key: result.identityKey,
     });
 };
 
@@ -554,7 +532,6 @@ const postMessage = async (req, res, next) => {
             req.session.userID,
             req.body.content,
             new Date().toUTCString(),
-            // req.body.header_data,
         ]
     );
 
@@ -610,7 +587,9 @@ const getSessionData = async (req, res, next) => {
         return;
     }
 
-    const bundle = prekeyBundles.find((b => b.deviceId.toString() === req.params.deviceId.toString()));
+    const bundle = prekeyBundles.find(
+        (b) => b.deviceId.toString() === req.params.deviceId.toString()
+    );
     if (!bundle) {
         res.status(404).send({
             error: "Prekey Bundle for specified device not found",
@@ -619,9 +598,8 @@ const getSessionData = async (req, res, next) => {
     }
 
     res.status(200).send({
-        prekeyBundle: bundle
+        prekeyBundle: bundle,
     });
-
 };
 
 export {

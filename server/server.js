@@ -23,18 +23,22 @@ app.use(cookieParser());
 
 // Session setup - create a reusable session parser for HTTP and WebSocket upgrades
 const sessionParser = session({
-    secret: process.env.SESSION_SECRET || "dev-secret-please-set-in-env",
+    secret:
+        process.env.SESSION_SECRET ||
+        "this-is-my-dev-secret-which-should-probably-be-changed",
     resave: false,
     saveUninitialized: false,
     cookie: {
         secure: process.env.NODE_ENV === "production",
         httpOnly: true,
-        sameSite: "lax",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
         maxAge: 7 * 24 * 60 * 60 * 1000,
-        // domain: '.ernestsgm.com',
+        domain:
+            process.env.NODE_ENV === "production"
+                ? ".ernestsgm.com"
+                : undefined,
     },
     store: new (connectPgSimple(session))({ pool: pool }),
-    
 });
 
 app.use(sessionParser);
@@ -46,7 +50,7 @@ app.use((req, res, next) => {
         "https://ernestsgm.com",
         "http://ernestsgm.com",
         "https://www.ernestsgm.com",
-        "http://localhost:3000"
+        "http://localhost:3000",
     ];
 
     const origin = req.headers.origin;
@@ -54,7 +58,7 @@ app.use((req, res, next) => {
     if (origin && allowedOrigins.includes(origin)) {
         res.setHeader("Access-Control-Allow-Origin", origin);
     }
-    
+
     res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
     res.set(
         "Access-Control-Allow-Headers",
@@ -81,7 +85,8 @@ const wss = new WebSocketServer({ noServer: true });
 
 // Allowed origins for upgrades (comma-separated env var)
 const allowedOrigins = (
-    process.env.ALLOWED_ORIGINS || "http://localhost:3000,https://ernestsgm.com,https://www.ernestsgm.com"
+    process.env.ALLOWED_ORIGINS ||
+    "http://localhost:3000,https://ernestsgm.com,https://www.ernestsgm.com"
 ).split(",");
 
 server.on("upgrade", (req, socket, head) => {
@@ -89,9 +94,9 @@ server.on("upgrade", (req, socket, head) => {
 
     // Only accept upgrades for the messages websocket path
     // If your client connects to a different path, it will never trigger this handler
-    if (!req.url || !req.url.startsWith('/ws/messages')) {
-        console.warn('WS upgrade rejected: unexpected path', { url: req.url });
-        socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+    if (!req.url || !req.url.startsWith("/ws/messages")) {
+        console.warn("WS upgrade rejected: unexpected path", { url: req.url });
+        socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
         socket.destroy();
         return;
     }

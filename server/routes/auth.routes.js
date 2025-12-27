@@ -1,6 +1,5 @@
 import { OAuth2Client } from "google-auth-library";
 import {
-    addLibsignalVerifier,
     checkIfUserExists,
     createCSRFToken,
     createUser,
@@ -20,8 +19,8 @@ const generateCSRFToken = (req, res) => {
     const token = createCSRFToken(req, res);
     res.cookie("csrf-token", token, {
         secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        // domain: ".ernestsgm.com",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+        domain: process.env.NODE_ENV === "production" ? ".ernestsgm.com" : undefined,
     });
     res.status(200).send({
         "x-csrf-token": token,
@@ -94,7 +93,6 @@ const auth = async (req, res) => {
         csrfToken: csrfToken,
         name: user.displayName,
         salt: dbUser.salt,
-        passwordIV: dbUser.password_iv,
     });
 };
 
@@ -111,7 +109,7 @@ const verifyPassword = async (req, res) => {
     }
 
     const user = await checkIfUserExists(req.session.email);
-    let id, pssw_iv, salt;
+    let id, salt;
     let signalKeys = {};
     if (!user) {
         // Check required fields for signal protocol
@@ -137,8 +135,7 @@ const verifyPassword = async (req, res) => {
             return;
         }
         id = created[0];
-        pssw_iv = created[1];
-        salt = created[2];
+        salt = created[1];
 
         // Upload key bundle (signal protocol)
         const uploadRes = await uploadUserKeys(id, req.body.keyBundle);
@@ -190,8 +187,6 @@ const verifyPassword = async (req, res) => {
         csrfToken: csrfToken,
         userID: id,
         userCreated: !user,
-        psswIV: user ? user.password_iv : pssw_iv,
-        // salt: user ? user.salt : salt,
         identityKey: signalKeys.identity_key || null,
         idkIV: signalKeys.idk_iv || null,
         prekeyBundle: prekeyBundle,
@@ -333,8 +328,7 @@ const uploadPrivKeys = async (req, res) => {
 
     if (
         !req.body.identityKey ||
-        !req.body.idkIV ||
-        !req.body.verifierKey
+        !req.body.idkIV
     ) {
         res.status(400).send({
             error: "Invalid private keys format.",
@@ -372,16 +366,6 @@ const uploadPrivKeys = async (req, res) => {
         });
         return;
     }
-
-    // const addedVerifier = await addLibsignalVerifier(user.id, req.body.verifierKey);
-    
-    // if (!addedVerifier) {
-    //     res.status(500).send({
-    //         error: "Failed to add verifier key. Try again.",
-    //         csrfToken: csrfToken,
-    //     });
-    //     return;
-    // }
 
     res.status(200).send({
         success: true,
