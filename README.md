@@ -6,7 +6,7 @@ A work-in-progress online chat application.
 
 Read the threat model and design decisions in the [THREAT_MODEL.md](THREAT_MODEL.md) file.
 
-![image](https://github.com/user-attachments/assets/d2cd63f3-0107-45d6-9415-8367a693cb21)
+<img width="1919" height="856" alt="image" src="https://github.com/user-attachments/assets/2271b1a9-fd2c-44a7-86ec-0d316baee844" />
 
 Cyber Netwire is an online, end-to-end encrypted chat app with similar functions to Discord or Slack. Or at least, that's the plan.
 
